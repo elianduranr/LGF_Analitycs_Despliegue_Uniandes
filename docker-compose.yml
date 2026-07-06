@@ -6,6 +6,7 @@ services:
       - "8001:8001"
     environment:
       LGF_DATA_DIR: /data
+      LGF_DATA_PATH: /data/${LGF_ACUM_FILE:-historic_sales_acum.csv}
       LGF_OUTPUT_DIR: /app/outputs
       MLFLOW_TRACKING_URI: file:/app/mlruns
     volumes:

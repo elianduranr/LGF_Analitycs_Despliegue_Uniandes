@@ -72,7 +72,8 @@ docker compose up --build
 ```
 
 El contenedor monta la carpeta local de datos en `/data`. La aplicacion lee
-`LGF_DATA_DIR=/data`, por eso el codigo no cambia entre maquinas.
+`LGF_DATA_PATH=/data/historic_sales_acum.csv`, por eso el codigo no cambia entre
+maquinas.
 
 ## Datos en la maquina virtual
 
@@ -85,17 +86,19 @@ sudo mkdir -p /opt/lgf/data
 sudo chown -R ubuntu:ubuntu /opt/lgf
 ```
 
-2. Copiar los CSV desde local a la VM:
+2. Copiar el acumulado desde local a la VM:
 
 ```powershell
-scp -i llave.pem "C:\Proyectos_gaitana\Proyecto_despliegue\bases de datos historicas\ventas_facturadas_*.csv" ubuntu@IP:/opt/lgf/data/
+scp -i llave.pem "C:\ruta\a\historic_sales_acum.csv" ubuntu@IP:/opt/lgf/data/
 ```
 
 3. En la VM, crear `.env`:
 
 ```bash
 LGF_HOST_DATA_DIR=/opt/lgf/data
+LGF_ACUM_FILE=historic_sales_acum.csv
 LGF_DATA_DIR=/data
+LGF_DATA_PATH=/data/historic_sales_acum.csv
 LGF_OUTPUT_DIR=/app/outputs
 MLFLOW_TRACKING_URI=file:/app/mlruns
 ```

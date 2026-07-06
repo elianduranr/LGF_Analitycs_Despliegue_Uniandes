@@ -138,3 +138,22 @@ def load_historical_sales(data_dir: str | Path) -> pd.DataFrame:
         frame["archivo_origen"] = path.name
         frames.append(frame)
     return clean_sales_frame(pd.concat(frames, ignore_index=True))
+
+
+def load_sales_source(data_path: str | Path | None = None, data_dir: str | Path | None = None) -> pd.DataFrame:
+    """Carga la fuente oficial del proyecto.
+
+    Prioridad:
+    1. `data_path`: archivo acumulado unico, recomendado para Elian/Julian.
+    2. `data_dir`: carpeta con `ventas_facturadas_*.csv`, respaldo de Entrega 1.
+    """
+    if data_path:
+        path = Path(data_path)
+        if not path.exists():
+            raise FileNotFoundError(f"No se encontro el acumulado: {path}")
+        frame = pd.read_csv(path, low_memory=False)
+        frame["archivo_origen"] = path.name
+        return clean_sales_frame(frame)
+    if data_dir is None:
+        raise ValueError("Debe definirse data_path o data_dir.")
+    return load_historical_sales(data_dir)

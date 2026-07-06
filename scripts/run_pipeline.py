@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from lgf_despliegue.data import load_historical_sales
+from lgf_despliegue.data import load_sales_source
 from lgf_despliegue.forecast import build_weekly_solid_demand, compare_models_with_mlflow
 from lgf_despliegue.sales import build_general_sales_outputs, write_sales_outputs
 
@@ -15,6 +15,11 @@ def parse_args() -> argparse.Namespace:
         default="../bases de datos historicas",
         help="Carpeta con ventas_facturadas_2021.csv ... ventas_facturadas_2026.csv",
     )
+    parser.add_argument(
+        "--data-path",
+        default=None,
+        help="Archivo acumulado unico, por ejemplo historic_sales_acum.csv. Tiene prioridad sobre --data-dir.",
+    )
     parser.add_argument("--output-dir", default="outputs", help="Carpeta de salidas CSV.")
     parser.add_argument("--mlflow-uri", default="mlruns", help="Tracking URI local de MLflow.")
     parser.add_argument("--skip-forecast", action="store_true", help="Solo generar ventas generales.")
@@ -24,7 +29,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
-    sales = load_historical_sales(args.data_dir)
+    sales = load_sales_source(data_path=args.data_path, data_dir=args.data_dir)
 
     sales_outputs = build_general_sales_outputs(sales)
     write_sales_outputs(sales_outputs, output_dir / "ventas_generales")

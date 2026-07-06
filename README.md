@@ -46,6 +46,12 @@ Ejecutar solo ventas generales:
 .\.venv\Scripts\python.exe scripts\run_pipeline.py --skip-forecast
 ```
 
+Con archivo acumulado unico:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_pipeline.py --data-path "C:\ruta\a\historic_sales_acum.csv" --skip-forecast
+```
+
 Ejecutar ventas generales y comparacion de modelos con MLflow:
 
 ```powershell
@@ -88,8 +94,9 @@ Rutas principales:
 - `POST /forecast/solidos`
 - `/docs` para Swagger.
 
-La carpeta de datos se configura con `LGF_DATA_DIR` o, en Docker Compose, con
-`LGF_HOST_DATA_DIR` en `.env`.
+La fuente recomendada es un unico acumulado `historic_sales_acum.csv`. Se
+configura con `LGF_DATA_PATH`; en Docker Compose se define la carpeta con
+`LGF_HOST_DATA_DIR` y el nombre del archivo con `LGF_ACUM_FILE`.
 
 ## Versionamiento de modelos
 
