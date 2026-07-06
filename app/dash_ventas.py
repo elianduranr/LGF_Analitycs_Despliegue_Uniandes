@@ -167,6 +167,23 @@ def scope_card(label: str, value: str, detail: str = "") -> html.Div:
     )
 
 
+def flower_chip(label: str, value: str, color: str, detail: str = "") -> html.Div:
+    return html.Div(
+        [
+            html.Div(style={"backgroundColor": color}, className="flower-swatch"),
+            html.Div(
+                [
+                    html.Div(label, className="flower-chip-label"),
+                    html.Div(value, className="flower-chip-value"),
+                    html.Div(detail, className="flower-chip-detail"),
+                ],
+                className="flower-chip-copy",
+            ),
+        ],
+        className="flower-chip",
+    )
+
+
 @lru_cache(maxsize=2)
 def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
     raw = load_sales_source(data_path=data_path or None, data_dir=data_dir)
@@ -337,8 +354,8 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
 
     annual_rows = []
     if ctx["comparison"]:
-        annual_rows.append({"anio": f"Año base {ctx['base']}", "ventas": ctx["base_m"]["ventas"]})
-    annual_rows.append({"anio": f"Año seleccionado {ctx['compare']}", "ventas": ctx["comp_m"]["ventas"]})
+        annual_rows.append({"anio": f"Ano base {ctx['base']}", "ventas": ctx["base_m"]["ventas"]})
+    annual_rows.append({"anio": f"Ano seleccionado {ctx['compare']}", "ventas": ctx["comp_m"]["ventas"]})
     fig_consolidated = px.bar(pd.DataFrame(annual_rows), x="anio", y="ventas", title="Consolidado real USD", color="anio", color_discrete_sequence=CORPORATE_SEQUENCE)
     apply_layout(fig_consolidated, 330)
     fig_consolidated.update_yaxes(title="USD", tickformat=",.2f")
@@ -468,7 +485,7 @@ def insight_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
 def concentration_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
     frame = ctx.get("compare_frame", pd.DataFrame())
     if frame.empty:
-        return [scope_card("Concentración", "Sin datos", "No hay información para el año seleccionado")]
+        return [scope_card("Concentracion", "Sin datos", "No hay informacion para el ano seleccionado")]
     total_tallos = float(frame["tallos_confirmados"].sum())
     total_usd = float(frame["ventas_usd"].sum())
 
@@ -485,6 +502,32 @@ def concentration_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
         scope_card("Top 5 colores", percent(share("color", "tallos_confirmados", 5)).replace("+", ""), "Lectura de mix floral"),
         scope_card("Países activos", money(frame["pais"].nunique(), 0), "Mercados con venta confirmada"),
     ]
+
+
+def flower_mix_cards(ctx: dict) -> list[html.Div]:
+    frame = ctx.get("compare_frame", pd.DataFrame())
+    if frame.empty:
+        return [flower_chip("Sin color", "Sin datos", "#9CA3AF", "No hay ventas para el alcance seleccionado")]
+    colors = (
+        frame.groupby("color", as_index=False)
+        .agg(tallos=("tallos_confirmados", "sum"), ventas_usd=("ventas_usd", "sum"), productos=("producto", "nunique"))
+        .sort_values("tallos", ascending=False)
+        .head(6)
+        .reset_index(drop=True)
+    )
+    total = max(float(colors["tallos"].sum()), 1.0)
+    cards = []
+    for idx, row in colors.iterrows():
+        share = float(row["tallos"]) / total
+        cards.append(
+            flower_chip(
+                str(row["color"]).title(),
+                money(row["tallos"], 0),
+                flower_color(row["color"], idx),
+                f"{percent(share).replace('+', '')} del top color | {money(row['productos'], 0)} productos",
+            )
+        )
+    return cards
 
 
 def build_options(df: pd.DataFrame, column: str, label_col: str | None = None, top: int | None = None) -> list[dict]:
@@ -512,20 +555,20 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
         [
             html.Div(
                 [
-                    html.Div([html.Div("La Gaitana Farms", className="kicker"), html.H1("Ventas generales"), html.P("Informe ejecutivo comercial basado en ventas reales confirmadas.")], className="hero-title"),
+                    html.Div([html.Div("La Gaitana Farms", className="kicker"), html.H1("Ventas generales"), html.P("Lectura comercial con enfoque en flor, color, cliente y mercado destino.")], className="hero-title"),
                     html.Div([html.Div("Fuente", className="source-label"), html.Div(source_path or source_dir, className="source-path")], className="source-card"),
                 ],
                 className="hero",
             ),
             html.Div(
                 [
-                    html.Div([html.Label("Año base"), dcc.Dropdown(id="base-year", options=[{"label": str(y), "value": y} for y in years], value=default_base, clearable=True)], className="control"),
-                    html.Div([html.Label("Año seleccionado"), dcc.Dropdown(id="compare-year", options=[{"label": str(y), "value": y} for y in years], value=default_compare, clearable=False)], className="control"),
-                    html.Div([html.Label("Años visibles"), dcc.Dropdown(id="years", options=[{"label": str(y), "value": y} for y in years], value=years, multi=True, clearable=False)], className="control control-wide"),
+                    html.Div([html.Label("Ano base"), dcc.Dropdown(id="base-year", options=[{"label": str(y), "value": y} for y in years], value=default_base, clearable=True)], className="control"),
+                    html.Div([html.Label("Ano comparativo"), dcc.Dropdown(id="compare-year", options=[{"label": str(y), "value": y} for y in years], value=default_compare, clearable=False)], className="control"),
+                    html.Div([html.Label("Anos visibles"), dcc.Dropdown(id="years", options=[{"label": str(y), "value": y} for y in years], value=years, multi=True, clearable=False)], className="control control-wide"),
                     html.Div([html.Label("Semanas ISO"), dcc.RangeSlider(id="weeks", min=week_min, max=week_max, value=[week_min, week_max], marks={week_min: str(week_min), week_max: str(week_max)}, tooltip={"placement": "bottom"})], className="control control-wide"),
-                    html.Div([html.Label("Compañía"), dcc.Dropdown(id="companies", options=build_options(df, "NomCompania", top=80), multi=True, placeholder="Todas")], className="control"),
+                    html.Div([html.Label("Compania"), dcc.Dropdown(id="companies", options=build_options(df, "NomCompania", top=80), multi=True, placeholder="Todas")], className="control"),
                     html.Div([html.Label("Cliente"), dcc.Dropdown(id="clients", options=build_options(df, "cod_cliente", "cliente", top=120), multi=True, placeholder="Todos")], className="control"),
-                    html.Div([html.Label("País"), dcc.Dropdown(id="countries", options=build_options(df, "pais"), multi=True, placeholder="Todos")], className="control"),
+                    html.Div([html.Label("Pais"), dcc.Dropdown(id="countries", options=build_options(df, "pais"), multi=True, placeholder="Todos")], className="control"),
                     html.Div([html.Label("Producto"), dcc.Dropdown(id="products", options=build_options(df, "producto"), multi=True, placeholder="Todos")], className="control"),
                     html.Div([html.Label("Color"), dcc.Dropdown(id="colors", options=build_options(df, "color", top=120), multi=True, placeholder="Todos")], className="control"),
                     html.Div([html.Label("Tipo operativo"), dcc.Dropdown(id="types", options=build_options(df, "tipo_pedido_operativo"), multi=True, placeholder="Todos")], className="control"),
@@ -535,22 +578,30 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             html.Div(id="metrics", className="metrics-grid"),
             html.Div(
                 [
-                    html.Div([html.Div("¿Cómo vamos frente al año base?", className="panel-title"), dcc.Graph(id="fig-consolidated")], className="panel"),
-                    html.Div([html.Div("Facturación mensual", className="panel-title"), dcc.Graph(id="fig-monthly")], className="panel"),
+                    html.Div([html.Div("Comparativo contra ano base", className="panel-title"), dcc.Graph(id="fig-consolidated")], className="panel"),
+                    html.Div([html.Div("Facturacion mensual", className="panel-title"), dcc.Graph(id="fig-monthly")], className="panel"),
                     html.Div([html.Div("Volumen semanal", className="panel-title"), dcc.Graph(id="fig-weekly")], className="panel"),
-                    html.Div([html.Div("Facturación por producto", className="panel-title"), dcc.Graph(id="fig-product-usd")], className="panel"),
+                    html.Div([html.Div("Facturacion por producto", className="panel-title"), dcc.Graph(id="fig-product-usd")], className="panel"),
                     html.Div([html.Div("Mix comercial", className="panel-title"), dcc.Graph(id="fig-mix")], className="panel"),
                     html.Div([html.Div("Precio y oportunidad", className="panel-title"), dcc.Graph(id="fig-price"), dcc.Graph(id="fig-opportunity")], className="panel"),
                 ],
                 className="grid-2",
             ),
-            html.Div([html.Div("Lectura estratégica", className="panel-title"), html.Div(id="insights", className="strategy-grid")], className="strategy-panel section-gap"),
+            html.Div([html.Div("Lectura ejecutiva", className="panel-title"), html.Div(id="insights", className="strategy-grid")], className="strategy-panel section-gap"),
             html.Div(
                 [
-                    html.Div("Concentración y alcance", className="panel-title"),
+                    html.Div("Concentracion y alcance", className="panel-title"),
                     html.Div(id="scope-cards", className="scope-strip"),
                 ],
                 className="strategy-panel section-gap",
+            ),
+            html.Div(
+                [
+                    html.Div("Lectura floral del mix", className="panel-title"),
+                    html.Div("Colores dominantes por tallos confirmados para orientar oferta, surtido y conversacion comercial.", className="panel-note"),
+                    html.Div(id="flower-mix", className="flower-strip"),
+                ],
+                className="flower-panel section-gap",
             ),
             html.Div(
                 [
@@ -563,8 +614,8 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             html.Div(
                 [
                     html.Div([html.Div("Comparativo por producto", className="panel-title"), html.Div(id="product-table")], className="table-panel"),
-                    html.Div([html.Div("Clientes por facturación", className="panel-title"), html.Div(id="client-table")], className="table-panel"),
-                    html.Div([html.Div("Crecimiento por país", className="panel-title"), html.Div(id="country-table")], className="table-panel"),
+                    html.Div([html.Div("Clientes por facturacion", className="panel-title"), html.Div(id="client-table")], className="table-panel"),
+                    html.Div([html.Div("Crecimiento por pais", className="panel-title"), html.Div(id="country-table")], className="table-panel"),
                     html.Div([html.Div("Producto por semana", className="panel-title"), html.Div(id="week-matrix")], className="table-panel"),
                 ],
                 className="table-grid",
@@ -576,15 +627,18 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
     app.index_string = """
     <!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>{%favicon%}{%css%}
     <style>
-    body{margin:0;background:#f3f4f6;color:#1f2937;font-family:Arial,sans-serif}.page{max-width:1540px;margin:0 auto;padding:22px}
-    .hero{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:18px;align-items:end;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:24px;margin-bottom:14px}
-    .kicker{color:#800020;text-transform:uppercase;font-size:13px;font-weight:700;letter-spacing:.04em}h1{margin:5px 0 8px;font-size:42px;line-height:1.05}.hero p{margin:0;color:#667085;font-size:16px}
-    .source-card{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:12px}.source-label{font-size:12px;font-weight:700;color:#667085;text-transform:uppercase}.source-path{font-size:13px;word-break:break-all}
-    .filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px}.control-wide{grid-column:span 2}label{font-size:12px;font-weight:700;color:#374151}
-    .metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.metric-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;min-height:96px}.metric-head{display:flex;justify-content:space-between;gap:8px}.metric-title{font-size:12px;font-weight:700;color:#667085;text-transform:uppercase}.metric-value{font-size:28px;font-weight:760;margin-top:10px}.metric-detail{font-size:12px;color:#667085;margin-top:5px}.delta{font-size:12px;font-weight:700;border-radius:999px;padding:3px 7px;background:#eef2f7}.positive{background:#e8f5ef;color:#027a48}.negative{background:#fdecec;color:#b42318}.neutral{background:#eef2f7;color:#667085}
-    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel,.table-panel,.strategy-panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;min-width:0}.panel-title{font-size:16px;font-weight:760;margin:2px 0 10px}.section-gap{margin-top:14px}
-    .strategy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.strategy-card{display:grid;grid-template-columns:44px 1fr;gap:10px;background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:12px}.strategy-index{font-weight:760;color:#800020}.strategy-text{line-height:1.45;color:#374151}
-    .table-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}@media(max-width:1050px){.hero,.filters,.grid-2,.table-grid{grid-template-columns:1fr}.control-wide{grid-column:auto}.metrics-grid{grid-template-columns:1fr 1fr}}@media(max-width:650px){.metrics-grid,.strategy-grid{grid-template-columns:1fr}.page{padding:12px}h1{font-size:32px}}
+    body{margin:0;background:#f4f6f8;color:#17202a;font-family:Inter,Arial,sans-serif}.page{max-width:1560px;margin:0 auto;padding:22px}
+    .hero{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:18px;align-items:end;background:linear-gradient(135deg,#800020 0%,#9b1b3f 45%,#4e79a7 100%);color:#fff;border:1px solid #74122b;border-radius:8px;padding:26px 28px;margin-bottom:14px;box-shadow:0 14px 30px rgba(23,32,42,.12)}
+    .kicker{color:#f8d7df;text-transform:uppercase;font-size:12px;font-weight:800;letter-spacing:.08em}h1{margin:5px 0 8px;font-size:42px;line-height:1.05;letter-spacing:0}.hero p{margin:0;color:#f6e7ec;font-size:16px;max-width:760px}
+    .source-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:13px}.source-label{font-size:11px;font-weight:800;color:#f8d7df;text-transform:uppercase}.source-path{font-size:13px;word-break:break-all;color:#fff}
+    .filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;background:#fff;border:1px solid #d9dee7;border-left:5px solid #800020;border-radius:8px;padding:14px;margin-bottom:14px}.control-wide{grid-column:span 2}label{display:block;font-size:11px;font-weight:800;color:#374151;text-transform:uppercase;margin-bottom:4px}
+    .metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.metric-card{background:#fff;border:1px solid #d9dee7;border-top:4px solid #800020;border-radius:8px;padding:13px;min-height:96px}.metric-head{display:flex;justify-content:space-between;gap:8px}.metric-title{font-size:11px;font-weight:800;color:#667085;text-transform:uppercase}.metric-value{font-size:27px;font-weight:800;margin-top:10px;color:#17202a}.metric-detail{font-size:12px;color:#667085;margin-top:5px}.delta{font-size:12px;font-weight:800;border-radius:999px;padding:3px 7px;background:#eef2f7}.positive{background:#e8f5ef;color:#027a48}.negative{background:#fdecec;color:#b42318}.neutral{background:#eef2f7;color:#667085}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel,.table-panel,.strategy-panel,.flower-panel{background:#fff;border:1px solid #d9dee7;border-radius:8px;padding:13px;min-width:0;box-shadow:0 8px 20px rgba(23,32,42,.04)}.panel-wide{grid-column:1/-1}.panel-title{font-size:16px;font-weight:800;margin:2px 0 10px;color:#17202a}.panel-note{color:#667085;font-size:13px;margin:-4px 0 12px}.section-gap{margin-top:14px}
+    .strategy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.strategy-card{display:grid;grid-template-columns:40px 1fr;gap:10px;background:#fbfcfd;border:1px solid #e6e9ef;border-radius:8px;padding:12px}.strategy-index{display:flex;align-items:center;justify-content:center;height:32px;width:32px;border-radius:50%;background:#f8d7df;font-weight:800;color:#800020}.strategy-text{line-height:1.45;color:#374151}
+    .scope-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.scope-card{background:#fbfcfd;border:1px solid #e6e9ef;border-radius:8px;padding:12px}.scope-label{font-size:11px;text-transform:uppercase;font-weight:800;color:#667085}.scope-value{font-size:22px;font-weight:800;margin-top:6px}.scope-detail{font-size:12px;color:#667085;margin-top:4px}
+    .flower-panel{border-left:5px solid #59a14f;background:linear-gradient(180deg,#fff 0%,#fbfdfb 100%)}.flower-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.flower-chip{display:grid;grid-template-columns:42px 1fr;gap:10px;align-items:center;background:#fff;border:1px solid #e6e9ef;border-radius:8px;padding:10px}.flower-swatch{width:32px;height:32px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #d9dee7}.flower-chip-label{font-size:12px;font-weight:800;text-transform:uppercase;color:#374151}.flower-chip-value{font-size:20px;font-weight:800;color:#17202a}.flower-chip-detail{font-size:12px;color:#667085}
+    .table-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th{background:#800020!important;color:#fff!important;font-weight:800!important}.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td{font-size:12px}
+    @media(max-width:1150px){.hero,.filters,.grid-2,.table-grid{grid-template-columns:1fr}.control-wide{grid-column:auto}.metrics-grid,.scope-strip,.flower-strip{grid-template-columns:1fr 1fr}}@media(max-width:650px){.metrics-grid,.strategy-grid,.scope-strip,.flower-strip{grid-template-columns:1fr}.page{padding:12px}h1{font-size:32px}}
     </style></head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>
     """
 
@@ -599,6 +653,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
         Output("fig-opportunity", "figure"),
         Output("insights", "children"),
         Output("scope-cards", "children"),
+        Output("flower-mix", "children"),
         Output("fig-product-color", "figure"),
         Output("fig-color", "figure"),
         Output("fig-country", "figure"),
@@ -633,6 +688,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
                 figs["opportunity"],
                 [],
                 [],
+                [],
                 figs["product_color"],
                 figs["color"],
                 figs["country"],
@@ -644,13 +700,13 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
 
         bm, cm = ctx["base_m"], ctx["comp_m"]
         cards = [
-            metric_card("Ventas USD", money(cm["ventas"], 2), f"Año seleccionado {ctx['compare']}", variation_label(bm["ventas"], cm["ventas"], LOW_USD_BASE_THRESHOLD) if ctx["comparison"] else None),
+            metric_card("Ventas USD", money(cm["ventas"], 2), f"Ano seleccionado {ctx['compare']}", variation_label(bm["ventas"], cm["ventas"], LOW_USD_BASE_THRESHOLD) if ctx["comparison"] else None),
             metric_card("Tallos confirmados", money(cm["tallos"], 0), "Volumen real", variation_label(bm["tallos"], cm["tallos"], LOW_STEMS_BASE_THRESHOLD) if ctx["comparison"] else None),
             metric_card("Precio promedio", f"US$ {money(cm['precio'], 4)}", "USD/tallo ponderado", variation_label(bm["precio"], cm["precio"]) if ctx["comparison"] else None),
             metric_card("Pedidos", money(cm["pedidos"], 0), "Pedidos distintos", variation_label(bm["pedidos"], cm["pedidos"]) if ctx["comparison"] else None),
             metric_card("Clientes activos", money(cm["clientes"], 0), "Con venta confirmada", variation_label(bm["clientes"], cm["clientes"]) if ctx["comparison"] else None),
             metric_card("Productos activos", money(cm["productos"], 0), "Portafolio vendido", variation_label(bm["productos"], cm["productos"]) if ctx["comparison"] else None),
-            metric_card("Venta prom. pedido", f"US$ {money(cm['venta_pedido'], 2)}", "Facturación / pedido"),
+            metric_card("Venta prom. pedido", f"US$ {money(cm['venta_pedido'], 2)}", "Facturacion / pedido"),
             metric_card("Tallos prom. pedido", money(cm["tallos_pedido"], 0), "Tallos / pedido"),
         ]
         figs = build_figures(view, ctx)
@@ -671,6 +727,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             figs["opportunity"],
             insight_cards(view, ctx),
             concentration_cards(view, ctx),
+            flower_mix_cards(ctx),
             figs["product_color"],
             figs["color"],
             figs["country"],
