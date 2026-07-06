@@ -25,6 +25,7 @@ cerrado a dos frentes:
 - `src/lgf_despliegue/`: primera version del codigo reusable.
 - `scripts/run_pipeline.py`: ejecutor de ventas generales y forecast con MLflow.
 - `app/main.py`: API FastAPI para salud, ventas generales e inferencia baseline.
+- `app/dash_ventas.py`: tablero descriptivo de ventas generales.
 - `Dockerfile` y `docker-compose.yml`: ejecucion contenedorizada.
 - `tox.ini`: ambientes `train`, `test_package`, `test_app` y `run` como en los talleres.
 - `docs/FLUJO_TRABAJO.md`: ramas, roles y prompts separados para Elian/Julian.
@@ -97,6 +98,19 @@ Rutas principales:
 La fuente recomendada es un unico acumulado `historic_sales_acum.csv`. Se
 configura con `LGF_DATA_PATH`; en Docker Compose se define la carpeta con
 `LGF_HOST_DATA_DIR` y el nombre del archivo con `LGF_ACUM_FILE`.
+
+## Dashboard Ventas Generales
+
+```powershell
+$env:PYTHONPATH="src"
+.\.venv\Scripts\python.exe app\dash_ventas.py --data-path "C:\ruta\a\historic_sales_acum.csv" --host 127.0.0.1 --port 8051
+```
+
+Luego abrir:
+
+```text
+http://127.0.0.1:8051
+```
 
 ## Versionamiento de modelos
 
