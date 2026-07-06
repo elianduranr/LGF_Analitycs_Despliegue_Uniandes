@@ -5,6 +5,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,347 +15,428 @@ from lgf_despliegue.config import load_config
 from lgf_despliegue.data import load_sales_source
 
 
-PLOT_TEMPLATE = "plotly_white"
-FLOWER_COLORS = {
-    "green": "#2f6f5e",
-    "leaf": "#8fb339",
-    "pink": "#c4417b",
-    "red": "#b8323a",
-    "yellow": "#d6a629",
-    "blue": "#3867a6",
-    "ink": "#1f2933",
-    "muted": "#667085",
-    "line": "#d9dee7",
-    "panel": "#ffffff",
-    "background": "#f5f7f3",
-}
+CORPORATE_BURGUNDY = "#800020"
+GRAPH_TEXT = "#374151"
+GRAPH_BG = "#FAFAFA"
+CORPORATE_SEQUENCE = [CORPORATE_BURGUNDY, "#4E79A7", "#59A14F", "#F28E2B", "#B07AA1", "#9CA3AF", "#E15759", "#76B7B2"]
+LOW_USD_BASE_THRESHOLD = 1_000.0
+LOW_STEMS_BASE_THRESHOLD = 1_000.0
+MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 
-def _fmt_int(value: float | int) -> str:
-    return f"{float(value):,.0f}".replace(",", ".")
+def money(value: float, decimals: int = 0) -> str:
+    if pd.isna(value):
+        return "NA"
+    return f"{float(value):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _fmt_usd(value: float | int) -> str:
-    return "US$ " + f"{float(value):,.0f}".replace(",", ".")
+def percent(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "NA"
+    return f"{float(value):+.1%}".replace(".", ",")
 
 
-def _fmt_pct(value: float | int) -> str:
-    return f"{float(value) * 100:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+def pct_change(base: float, comp: float, low_threshold: float = 0.0) -> float | None:
+    base = float(base or 0)
+    comp = float(comp or 0)
+    if base == 0:
+        return np.nan
+    if abs(base) < low_threshold:
+        return np.nan
+    return (comp - base) / base
+
+
+def variation_label(base: float, comp: float, low_threshold: float = 0.0) -> str:
+    base = float(base or 0)
+    comp = float(comp or 0)
+    if base == 0 and comp > 0:
+        return "Nuevo"
+    if base > 0 and comp == 0:
+        return "Perdido"
+    if abs(base) < low_threshold and comp != base:
+        return "Base baja"
+    change = pct_change(base, comp)
+    if pd.isna(change):
+        return "Sin base"
+    return percent(change)
+
+
+def apply_layout(fig: go.Figure, height: int = 360) -> go.Figure:
+    fig.update_layout(
+        template="plotly_white",
+        height=height,
+        margin=dict(l=24, r=24, t=56, b=42),
+        font=dict(family="Arial, sans-serif", size=12, color=GRAPH_TEXT),
+        paper_bgcolor=GRAPH_BG,
+        plot_bgcolor=GRAPH_BG,
+        colorway=CORPORATE_SEQUENCE,
+        legend_title_text="",
+    )
+    fig.update_xaxes(gridcolor="#E5E7EB", zerolinecolor="#D1D5DB")
+    fig.update_yaxes(gridcolor="#E5E7EB", zerolinecolor="#D1D5DB")
+    return fig
+
+
+def empty_figure(title: str) -> go.Figure:
+    fig = go.Figure()
+    fig.add_annotation(text="Sin datos para los filtros seleccionados", x=0.5, y=0.5, showarrow=False)
+    fig.update_layout(title=title)
+    return apply_layout(fig, 340)
+
+
+def selected_values(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def table(df: pd.DataFrame, page_size: int = 10, sort_by: list[dict] | None = None) -> dash_table.DataTable:
+    if df.empty:
+        df = pd.DataFrame({"mensaje": ["Sin datos para mostrar"]})
+    numeric_cols = {col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])}
+    return dash_table.DataTable(
+        data=df.to_dict("records"),
+        columns=[{"name": col, "id": col, "type": "numeric"} if col in numeric_cols else {"name": col, "id": col} for col in df.columns],
+        page_size=page_size,
+        sort_action="native",
+        filter_action="native",
+        sort_by=sort_by or [],
+        export_format="xlsx",
+        style_table={"overflowX": "auto", "maxHeight": "430px", "overflowY": "auto"},
+        style_cell={
+            "fontFamily": "Arial, sans-serif",
+            "fontSize": 12,
+            "padding": "7px",
+            "minWidth": "90px",
+            "maxWidth": "280px",
+            "whiteSpace": "normal",
+            "height": "auto",
+        },
+        style_header={"backgroundColor": CORPORATE_BURGUNDY, "color": "white", "fontWeight": "600"},
+        style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#f7f9fb"}],
+    )
+
+
+def metric_card(title: str, value: str, detail: str = "", delta: str | None = None) -> html.Div:
+    delta_class = "delta neutral"
+    if delta and delta.startswith("+"):
+        delta_class = "delta positive"
+    elif delta and delta.startswith("-"):
+        delta_class = "delta negative"
+    return html.Div(
+        [
+            html.Div([html.Div(title, className="metric-title"), html.Span(delta or "", className=delta_class)], className="metric-head"),
+            html.Div(value, className="metric-value"),
+            html.Div(detail, className="metric-detail"),
+        ],
+        className="metric-card",
+    )
 
 
 @lru_cache(maxsize=2)
 def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
-    sales = load_sales_source(data_path=data_path or None, data_dir=data_dir)
-    confirmed = sales[sales["es_confirmado"]].copy()
-    if confirmed.empty:
-        confirmed = sales.copy()
-    confirmed["tipo_pedido"] = confirmed["es_solido"].map({True: "SOLIDO", False: "NO_SOLIDO"})
-    confirmed["periodo"] = confirmed["anio"].astype(str) + "-" + confirmed["mes"].astype(str).str.zfill(2)
-    confirmed["precio_usd_tallo"] = confirmed["ventas_usd"] / confirmed["tallos_demanda"].replace(0, pd.NA)
-    return confirmed
+    raw = load_sales_source(data_path=data_path or None, data_dir=data_dir)
+    df = raw[raw["es_confirmado"]].copy()
+    if df.empty:
+        df = raw.copy()
+    df["tallos_confirmados"] = pd.to_numeric(df["tallos_demanda"], errors="coerce").fillna(0)
+    df["ventas_usd"] = pd.to_numeric(df["ventas_usd"], errors="coerce").fillna(0)
+    df["valor_total_original"] = pd.to_numeric(df.get("valor_total_original", df.get("valor_total", 0)), errors="coerce").fillna(0)
+    df["precio_usd_tallo"] = (df["ventas_usd"] / df["tallos_confirmados"].replace(0, np.nan)).fillna(0)
+    df["tipo_pedido_operativo"] = df["tipo_pedido_operativo"].fillna("NO_SOLIDO").astype(str).str.upper()
+    df["tipo_pedido_operativo"] = np.where(df["tipo_pedido_operativo"].isin(["", "SIN_INFO", "NAN", "NONE"]), df["es_solido"].map({True: "SOLIDO", False: "NO_SOLIDO"}), df["tipo_pedido_operativo"])
+    df["NomCompania"] = df["NomCompania"].where(~df["NomCompania"].isin(["sin_info", "nan", "none", ""]), df["cliente_analisis"])
+    df["cod_cliente"] = df["cod_cliente"].astype(str)
+    df["cliente"] = df["cliente_analisis"].astype(str)
+    df["pedidos"] = df["pedidos"].astype(str)
+    df["anio_semana"] = df["anio"].astype(str) + "-S" + df["semana_iso"].astype(str).str.zfill(2)
+    return df
 
 
-def _source_from_env() -> tuple[str | None, str]:
-    config = load_config()
-    return (str(config.data_path) if config.data_path else None, str(config.data_dir))
-
-
-def _filter_frame(frame: pd.DataFrame, years: list[int] | None, order_types: list[str] | None) -> pd.DataFrame:
-    out = frame.copy()
-    if years:
-        out = out[out["anio"].isin([int(year) for year in years])]
-    if order_types:
-        out = out[out["tipo_pedido"].isin(order_types)]
+def summarize(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    out = df.groupby(group_cols, dropna=False, as_index=False).agg(
+        tallos_confirmados=("tallos_confirmados", "sum"),
+        ventas_usd=("ventas_usd", "sum"),
+        valor_total_original=("valor_total_original", "sum"),
+        pedidos=("pedidos", "nunique"),
+        clientes=("cod_cliente", "nunique"),
+        productos=("producto", "nunique"),
+        producto_colores=("producto_color", "nunique"),
+    )
+    out["precio_usd_tallo"] = (out["ventas_usd"] / out["tallos_confirmados"].replace(0, np.nan)).fillna(0)
     return out
 
 
-def _kpi(label: str, value: str, detail: str) -> html.Div:
-    return html.Div(
-        [
-            html.Div(label, className="kpi-label"),
-            html.Div(value, className="kpi-value"),
-            html.Div(detail, className="kpi-detail"),
-        ],
-        className="kpi",
-    )
+def filter_frame(df: pd.DataFrame, years, weeks, companies, clients, countries, products, colors, order_types) -> pd.DataFrame:
+    out = df.copy()
+    vals = selected_values(years)
+    if vals:
+        out = out[out["anio"].isin([int(v) for v in vals])]
+    if weeks and len(weeks) == 2:
+        out = out[out["semana_iso"].between(int(weeks[0]), int(weeks[1]))]
+    for col, value in [
+        ("NomCompania", companies),
+        ("cod_cliente", clients),
+        ("pais", countries),
+        ("producto", products),
+        ("color", colors),
+        ("tipo_pedido_operativo", order_types),
+    ]:
+        vals = selected_values(value)
+        if vals:
+            out = out[out[col].astype(str).isin(vals)]
+    return out
 
 
-def _empty_figure(title: str) -> go.Figure:
-    fig = go.Figure()
-    fig.update_layout(
-        template=PLOT_TEMPLATE,
-        title=title,
-        xaxis={"visible": False},
-        yaxis={"visible": False},
-        annotations=[{"text": "Sin datos para los filtros seleccionados", "xref": "paper", "yref": "paper", "showarrow": False}],
-        height=360,
-    )
-    return fig
+def build_context(view: pd.DataFrame, base_year: int | None, compare_year: int | None) -> dict:
+    years = sorted(pd.to_numeric(view["anio"], errors="coerce").dropna().astype(int).unique().tolist()) if not view.empty else []
+    if not years:
+        return {"ok": False, "years": []}
+    comp = int(compare_year) if compare_year in years else years[-1]
+    base = int(base_year) if base_year in years and int(base_year) != comp else None
+    if base is None and len(years) > 1:
+        base = [y for y in years if y != comp][-1]
+    comparison = base is not None and base != comp
+    comp_frame = view[view["anio"].eq(comp)].copy()
+    base_frame = view[view["anio"].eq(base)].copy() if comparison else view.iloc[0:0].copy()
+
+    def metrics(frame: pd.DataFrame) -> dict:
+        tallos = float(frame["tallos_confirmados"].sum())
+        ventas = float(frame["ventas_usd"].sum())
+        pedidos = float(frame["pedidos"].nunique()) if "pedidos" in frame else float(len(frame))
+        return {
+            "ventas": ventas,
+            "tallos": tallos,
+            "precio": ventas / tallos if tallos else 0,
+            "pedidos": pedidos,
+            "clientes": float(frame["cod_cliente"].nunique()),
+            "productos": float(frame["producto"].nunique()),
+            "venta_pedido": ventas / pedidos if pedidos else 0,
+            "tallos_pedido": tallos / pedidos if pedidos else 0,
+        }
+
+    base_m = metrics(base_frame)
+    comp_m = metrics(comp_frame)
+    return {"ok": True, "base": base, "compare": comp, "comparison": comparison, "base_frame": base_frame, "compare_frame": comp_frame, "base_m": base_m, "comp_m": comp_m}
 
 
-def _build_figures(filtered: pd.DataFrame) -> tuple[go.Figure, go.Figure, go.Figure, go.Figure]:
-    if filtered.empty:
-        return (
-            _empty_figure("Tallos y ventas por mes"),
-            _empty_figure("Top clientes por tallos"),
-            _empty_figure("Producto-color por tallos"),
-            _empty_figure("Mezcla SOLIDO / NO_SOLIDO"),
-        )
-
-    monthly = filtered.groupby(["periodo", "tipo_pedido"], as_index=False).agg(
-        tallos=("tallos_demanda", "sum"),
-        ventas_usd=("ventas_usd", "sum"),
-    )
-    fig_monthly = px.bar(
-        monthly,
-        x="periodo",
-        y="tallos",
-        color="tipo_pedido",
-        color_discrete_map={"SOLIDO": FLOWER_COLORS["pink"], "NO_SOLIDO": FLOWER_COLORS["green"]},
-        template=PLOT_TEMPLATE,
-        title="Tallos confirmados por mes",
-        labels={"periodo": "Mes", "tallos": "Tallos", "tipo_pedido": "Tipo"},
-    )
-    fig_monthly.update_layout(height=390, legend_orientation="h", legend_y=1.1, margin=dict(l=40, r=20, t=60, b=80))
-
-    clients = (
-        filtered.groupby("cliente_analisis", as_index=False)
-        .agg(tallos=("tallos_demanda", "sum"), ventas_usd=("ventas_usd", "sum"))
-        .sort_values("tallos", ascending=False)
-        .head(12)
-        .sort_values("tallos")
-    )
-    fig_clients = px.bar(
-        clients,
-        x="tallos",
-        y="cliente_analisis",
-        orientation="h",
-        template=PLOT_TEMPLATE,
-        title="Clientes que explican mayor volumen",
-        labels={"cliente_analisis": "Cliente", "tallos": "Tallos"},
-        color_discrete_sequence=[FLOWER_COLORS["blue"]],
-    )
-    fig_clients.update_layout(height=430, margin=dict(l=20, r=20, t=60, b=40), yaxis={"automargin": True})
-
-    product_color = (
-        filtered.groupby(["producto_color", "producto", "color"], as_index=False)
-        .agg(tallos=("tallos_demanda", "sum"), ventas_usd=("ventas_usd", "sum"))
-        .sort_values("tallos", ascending=False)
-        .head(15)
-        .sort_values("tallos")
-    )
-    fig_product = px.bar(
-        product_color,
-        x="tallos",
-        y="producto_color",
-        orientation="h",
-        template=PLOT_TEMPLATE,
-        title="Producto-color con mayor demanda",
-        labels={"producto_color": "Producto-color", "tallos": "Tallos"},
-        color="producto",
-        color_discrete_sequence=[FLOWER_COLORS["pink"], FLOWER_COLORS["green"], FLOWER_COLORS["yellow"], FLOWER_COLORS["red"], FLOWER_COLORS["blue"]],
-    )
-    fig_product.update_layout(height=430, margin=dict(l=20, r=20, t=60, b=40), yaxis={"automargin": True}, legend_title_text="Producto")
-
-    mix = filtered.groupby("tipo_pedido", as_index=False).agg(tallos=("tallos_demanda", "sum"))
-    fig_mix = px.pie(
-        mix,
-        values="tallos",
-        names="tipo_pedido",
-        hole=0.55,
-        template=PLOT_TEMPLATE,
-        title="Participacion por tipo de pedido",
-        color="tipo_pedido",
-        color_discrete_map={"SOLIDO": FLOWER_COLORS["pink"], "NO_SOLIDO": FLOWER_COLORS["green"]},
-    )
-    fig_mix.update_layout(height=360, margin=dict(l=20, r=20, t=60, b=30), legend_orientation="h", legend_y=-0.05)
-    return fig_monthly, fig_clients, fig_product, fig_mix
+def product_compare_table(ctx: dict, rows: int = 20) -> pd.DataFrame:
+    comp = ctx["compare_frame"].groupby("producto", as_index=False).agg(tallos_compare=("tallos_confirmados", "sum"), usd_compare=("ventas_usd", "sum"))
+    base = ctx["base_frame"].groupby("producto", as_index=False).agg(tallos_base=("tallos_confirmados", "sum"), usd_base=("ventas_usd", "sum")) if ctx["comparison"] else pd.DataFrame(columns=["producto", "tallos_base", "usd_base"])
+    out = base.merge(comp, on="producto", how="outer").fillna(0)
+    out["dif_usd"] = out["usd_compare"] - out["usd_base"]
+    out["dif_tallos"] = out["tallos_compare"] - out["tallos_base"]
+    out["var_usd"] = out.apply(lambda r: variation_label(r["usd_base"], r["usd_compare"], LOW_USD_BASE_THRESHOLD), axis=1)
+    out["var_tallos"] = out.apply(lambda r: variation_label(r["tallos_base"], r["tallos_compare"], LOW_STEMS_BASE_THRESHOLD), axis=1)
+    total_tallos = max(float(out["tallos_compare"].sum()), 1)
+    out["share"] = out["tallos_compare"] / total_tallos
+    out = out.sort_values(["usd_compare", "dif_usd"], ascending=False).head(rows)
+    display = out.rename(columns={
+        "producto": "Producto",
+        "usd_base": f"USD {ctx['base'] or 'base'}",
+        "usd_compare": f"USD {ctx['compare']}",
+        "dif_usd": "Dif. USD",
+        "var_usd": "Var. USD",
+        "tallos_base": f"Tallos {ctx['base'] or 'base'}",
+        "tallos_compare": f"Tallos {ctx['compare']}",
+        "dif_tallos": "Dif. tallos",
+        "var_tallos": "Var. tallos",
+        "share": f"Share tallos {ctx['compare']}",
+    })
+    for col in [c for c in display.columns if c.startswith("USD") or c == "Dif. USD"]:
+        display[col] = display[col].map(lambda v: money(v, 2))
+    for col in [c for c in display.columns if c.startswith("Tallos") or c == "Dif. tallos"]:
+        display[col] = display[col].map(lambda v: money(v, 0))
+    if f"Share tallos {ctx['compare']}" in display:
+        display[f"Share tallos {ctx['compare']}"] = display[f"Share tallos {ctx['compare']}"].map(lambda v: percent(v).replace("+", ""))
+    return display
 
 
-def _build_tables(filtered: pd.DataFrame) -> tuple[list[dict], list[dict], list[dict]]:
-    if filtered.empty:
-        return [], [], []
-    by_year = filtered.groupby("anio", as_index=False).agg(
-        tallos=("tallos_demanda", "sum"),
-        ventas_usd=("ventas_usd", "sum"),
-        clientes=("cliente_analisis", "nunique"),
-        producto_colores=("producto_color", "nunique"),
-    )
-    by_year["usd_tallo"] = by_year["ventas_usd"] / by_year["tallos"].replace(0, pd.NA)
-
-    client = (
-        filtered.groupby("cliente_analisis", as_index=False)
-        .agg(tallos=("tallos_demanda", "sum"), ventas_usd=("ventas_usd", "sum"), producto_colores=("producto_color", "nunique"))
-        .sort_values("tallos", ascending=False)
-        .head(10)
-    )
-    product = (
-        filtered.groupby("producto_color", as_index=False)
-        .agg(tallos=("tallos_demanda", "sum"), ventas_usd=("ventas_usd", "sum"), clientes=("cliente_analisis", "nunique"))
-        .sort_values("tallos", ascending=False)
-        .head(10)
-    )
-    for table in [by_year, client, product]:
-        if "tallos" in table:
-            table["tallos"] = table["tallos"].map(_fmt_int)
-        if "ventas_usd" in table:
-            table["ventas_usd"] = table["ventas_usd"].map(_fmt_usd)
-        if "usd_tallo" in table:
-            table["usd_tallo"] = table["usd_tallo"].map(lambda value: f"US$ {float(value):.3f}" if pd.notna(value) else "NA")
-    return by_year.to_dict("records"), client.to_dict("records"), product.to_dict("records")
+def dimension_growth(view: pd.DataFrame, ctx: dict, group_cols: list[str], rows: int = 20) -> pd.DataFrame:
+    if not ctx["comparison"]:
+        return pd.DataFrame()
+    base = ctx["base_frame"].groupby(group_cols, dropna=False, as_index=False).agg(usd_base=("ventas_usd", "sum"), tallos_base=("tallos_confirmados", "sum"))
+    comp = ctx["compare_frame"].groupby(group_cols, dropna=False, as_index=False).agg(usd_compare=("ventas_usd", "sum"), tallos_compare=("tallos_confirmados", "sum"))
+    out = base.merge(comp, on=group_cols, how="outer").fillna(0)
+    out["dif_usd"] = out["usd_compare"] - out["usd_base"]
+    out["var_usd"] = out.apply(lambda r: variation_label(r["usd_base"], r["usd_compare"], LOW_USD_BASE_THRESHOLD), axis=1)
+    out = out.sort_values("usd_compare", ascending=False).head(rows)
+    rename = {col: col.replace("_", " ").title() for col in group_cols}
+    rename.update({"usd_base": f"USD {ctx['base']}", "usd_compare": f"USD {ctx['compare']}", "dif_usd": "Dif. USD", "var_usd": "Var. USD"})
+    out = out.rename(columns=rename)
+    for col in [f"USD {ctx['base']}", f"USD {ctx['compare']}", "Dif. USD"]:
+        out[col] = out[col].map(lambda v: money(v, 2))
+    return out[[*rename.values()]]
 
 
-def _insights(filtered: pd.DataFrame) -> list[html.Li]:
-    if filtered.empty:
-        return [html.Li("No hay datos para los filtros seleccionados.")]
-    total_tallos = filtered["tallos_demanda"].sum()
-    total_ventas = filtered["ventas_usd"].sum()
-    solid_tallos = filtered.loc[filtered["tipo_pedido"].eq("SOLIDO"), "tallos_demanda"].sum()
-    top_client = (
-        filtered.groupby("cliente_analisis")["tallos_demanda"].sum().sort_values(ascending=False).head(1)
-    )
-    top_product = (
-        filtered.groupby("producto_color")["tallos_demanda"].sum().sort_values(ascending=False).head(1)
-    )
-    monthly = filtered.groupby("periodo")["tallos_demanda"].sum().sort_values(ascending=False).head(1)
-    return [
-        html.Li(f"SOLIDO representa {_fmt_pct(solid_tallos / total_tallos if total_tallos else 0)} del volumen confirmado filtrado."),
-        html.Li(f"El cliente con mayor peso es {top_client.index[0]} con {_fmt_int(top_client.iloc[0])} tallos."),
-        html.Li(f"La combinacion producto-color lider es {top_product.index[0]} con {_fmt_int(top_product.iloc[0])} tallos."),
-        html.Li(f"El mes de mayor demanda filtrada es {monthly.index[0]} con {_fmt_int(monthly.iloc[0])} tallos."),
-        html.Li(f"El precio promedio ponderado es US$ {total_ventas / total_tallos:.3f} por tallo." if total_tallos else "No se puede calcular precio por tallo."),
-    ]
+def product_week_matrix(view: pd.DataFrame, rows: int = 80) -> pd.DataFrame:
+    if view.empty:
+        return pd.DataFrame()
+    work = view.copy()
+    work["semana_col"] = work["anio"].astype(str) + "-S" + work["semana_iso"].astype(str).str.zfill(2)
+    grouped = work.groupby(["producto", "semana_col"], as_index=False)["tallos_confirmados"].sum()
+    matrix = grouped.pivot_table(index="producto", columns="semana_col", values="tallos_confirmados", aggfunc="sum", fill_value=0).reset_index()
+    week_cols = [col for col in matrix.columns if col != "producto"]
+    matrix["Total"] = matrix[week_cols].sum(axis=1)
+    matrix = matrix.sort_values("Total", ascending=False).head(rows).rename(columns={"producto": "Producto"})
+    for col in week_cols + ["Total"]:
+        matrix[col] = matrix[col].map(lambda v: money(v, 0))
+    return matrix
 
 
-def build_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
-    env_data_path, env_data_dir = _source_from_env()
-    source_path = data_path or env_data_path
-    source_dir = data_dir or env_data_dir
-    frame = load_dashboard_data(source_path, source_dir)
-    years = sorted(frame["anio"].dropna().astype(int).unique().tolist())
+def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
+    if view.empty or not ctx.get("ok"):
+        return {key: empty_figure(title) for key, title in {
+            "consolidated": "Consolidado real USD",
+            "monthly": "Facturacion USD por mes",
+            "weekly": "Tallos confirmados por semana",
+            "product_usd": "Facturacion por producto",
+            "mix": "Mix por producto",
+            "price": "Precio por producto",
+            "opportunity": "Matriz de oportunidad",
+        }.items()}
+
+    annual_rows = []
+    if ctx["comparison"]:
+        annual_rows.append({"anio": f"Año base {ctx['base']}", "ventas": ctx["base_m"]["ventas"]})
+    annual_rows.append({"anio": f"Año seleccionado {ctx['compare']}", "ventas": ctx["comp_m"]["ventas"]})
+    fig_consolidated = px.bar(pd.DataFrame(annual_rows), x="anio", y="ventas", title="Consolidado real USD", color="anio", color_discrete_sequence=CORPORATE_SEQUENCE)
+    apply_layout(fig_consolidated, 330)
+    fig_consolidated.update_yaxes(title="USD", tickformat=",.2f")
+
+    monthly = summarize(view[view["anio"].isin([y for y in [ctx["base"], ctx["compare"]] if y])], ["anio", "mes"])
+    monthly["Mes"] = monthly["mes"].map(lambda m: MONTHS[int(m) - 1] if 1 <= int(m) <= 12 else str(m))
+    fig_monthly = px.bar(monthly, x="Mes", y="ventas_usd", color="anio", barmode="group", title="Facturacion USD por mes", color_discrete_sequence=CORPORATE_SEQUENCE)
+    apply_layout(fig_monthly, 360)
+    fig_monthly.update_yaxes(title="USD", tickformat=",.2f")
+
+    weekly = summarize(view, ["anio", "semana_iso"]).sort_values(["anio", "semana_iso"])
+    fig_weekly = px.line(weekly, x="semana_iso", y="tallos_confirmados", color="anio", markers=True, title="Tallos confirmados por semana", color_discrete_sequence=CORPORATE_SEQUENCE)
+    apply_layout(fig_weekly, 370)
+    fig_weekly.update_yaxes(title="Tallos", tickformat=",d")
+    fig_weekly.update_xaxes(title="Semana ISO")
+
+    prod = product_compare_table(ctx, rows=10)
+    raw_prod = ctx["compare_frame"].groupby("producto", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos_confirmados=("tallos_confirmados", "sum")).sort_values("ventas_usd", ascending=False).head(10)
+    fig_product_usd = px.bar(raw_prod.sort_values("ventas_usd"), y="producto", x="ventas_usd", orientation="h", title="Productos que explican la facturación", color_discrete_sequence=[CORPORATE_BURGUNDY])
+    apply_layout(fig_product_usd, 370)
+    fig_product_usd.update_xaxes(title="USD", tickformat=",.2f")
+    fig_product_usd.update_yaxes(title="")
+
+    mix = ctx["compare_frame"].groupby("producto", as_index=False)["tallos_confirmados"].sum().sort_values("tallos_confirmados", ascending=False)
+    if len(mix) > 7:
+        mix = pd.concat([mix.head(7), pd.DataFrame([{"producto": "Otros", "tallos_confirmados": mix.iloc[7:]["tallos_confirmados"].sum()}])])
+    fig_mix = px.pie(mix, names="producto", values="tallos_confirmados", hole=0.42, title=f"Mix de tallos {ctx['compare']}", color_discrete_sequence=CORPORATE_SEQUENCE)
+    apply_layout(fig_mix, 360)
+
+    price = ctx["compare_frame"].groupby("producto", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos=("tallos_confirmados", "sum"))
+    price["precio"] = (price["ventas_usd"] / price["tallos"].replace(0, np.nan)).fillna(0)
+    price = price.sort_values("ventas_usd", ascending=False).head(12).sort_values("precio")
+    fig_price = px.bar(price, y="producto", x="precio", orientation="h", title="Precio promedio por producto", color_discrete_sequence=["#4E79A7"])
+    apply_layout(fig_price, 360)
+    fig_price.update_xaxes(title="USD/tallo", tickformat=",.4f")
+    fig_price.update_yaxes(title="")
+
+    opp = ctx["compare_frame"].groupby("producto", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos=("tallos_confirmados", "sum"), clientes=("cod_cliente", "nunique"))
+    opp["precio"] = (opp["ventas_usd"] / opp["tallos"].replace(0, np.nan)).fillna(0)
+    fig_opp = px.scatter(opp, x="tallos", y="precio", size="ventas_usd", color="producto", hover_data=["clientes", "ventas_usd"], title="Matriz de oportunidad: volumen vs precio", color_discrete_sequence=CORPORATE_SEQUENCE)
+    apply_layout(fig_opp, 360)
+    fig_opp.update_xaxes(title="Tallos", tickformat=",d")
+    fig_opp.update_yaxes(title="USD/tallo", tickformat=",.4f")
+
+    return {"consolidated": fig_consolidated, "monthly": fig_monthly, "weekly": fig_weekly, "product_usd": fig_product_usd, "mix": fig_mix, "price": fig_price, "opportunity": fig_opp}
+
+
+def insight_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
+    if view.empty or not ctx.get("ok"):
+        return [html.Div("No hay datos para construir lectura ejecutiva.", className="strategy-card")]
+    items = []
+    if ctx["comparison"]:
+        usd_delta = ctx["comp_m"]["ventas"] - ctx["base_m"]["ventas"]
+        tallos_delta = ctx["comp_m"]["tallos"] - ctx["base_m"]["tallos"]
+        items.append(f"Ventas: {money(ctx['base_m']['ventas'], 2)} USD en {ctx['base']} vs {money(ctx['comp_m']['ventas'], 2)} USD en {ctx['compare']} ({variation_label(ctx['base_m']['ventas'], ctx['comp_m']['ventas'], LOW_USD_BASE_THRESHOLD)}).")
+        items.append(f"Tallos: diferencia de {money(tallos_delta, 0)} tallos frente al año base.")
+        items.append(f"Precio: pasa de {money(ctx['base_m']['precio'], 4)} a {money(ctx['comp_m']['precio'], 4)} USD/tallo.")
+    else:
+        items.append(f"El alcance filtrado tiene {money(ctx['comp_m']['ventas'], 2)} USD y {money(ctx['comp_m']['tallos'], 0)} tallos confirmados en {ctx['compare']}.")
+    top_product = ctx["compare_frame"].groupby("producto")["ventas_usd"].sum().sort_values(ascending=False).head(1)
+    top_client = ctx["compare_frame"].groupby("cliente")["ventas_usd"].sum().sort_values(ascending=False).head(1)
+    if not top_product.empty:
+        items.append(f"Producto líder por facturación: {top_product.index[0]} con {money(top_product.iloc[0], 2)} USD.")
+    if not top_client.empty:
+        items.append(f"Cliente líder por facturación: {top_client.index[0]} con {money(top_client.iloc[0], 2)} USD.")
+    return [html.Div([html.Div(f"{idx:02d}", className="strategy-index"), html.Div(text, className="strategy-text")], className="strategy-card") for idx, text in enumerate(items[:5], 1)]
+
+
+def build_options(df: pd.DataFrame, column: str, label_col: str | None = None, top: int | None = None) -> list[dict]:
+    if df.empty or column not in df:
+        return []
+    label_col = label_col or column
+    grouped = df.groupby(column, dropna=False).agg(label=(label_col, "first"), tallos=("tallos_confirmados", "sum")).reset_index().sort_values("tallos", ascending=False)
+    if top:
+        grouped = grouped.head(top)
+    return [{"label": f"{row['label']} | {money(row['tallos'], 0)} tallos", "value": str(row[column])} for _, row in grouped.iterrows()]
+
+
+def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
+    config = load_config()
+    source_path = data_path or (str(config.data_path) if config.data_path else None)
+    source_dir = data_dir or str(config.data_dir)
+    df = load_dashboard_data(source_path, source_dir)
+    years = sorted(df["anio"].dropna().astype(int).unique().tolist())
+    default_compare = years[-1] if years else None
+    default_base = years[-2] if len(years) > 1 else None
+    week_min, week_max = int(df["semana_iso"].min()), int(df["semana_iso"].max())
+
     app = Dash(__name__, title="LGF Ventas Generales")
-
     app.layout = html.Div(
         [
             html.Div(
                 [
-                    html.Div(
-                        [
-                            html.Div("La Gaitana Farms", className="brand"),
-                            html.H1("Ventas generales"),
-                            html.P("Lectura comercial de tallos, ventas, clientes y producto-color para enfocar decisiones de demanda."),
-                        ],
-                        className="title-block",
-                    ),
-                    html.Div(
-                        [
-                            html.Label("Anios"),
-                            dcc.Dropdown(
-                                id="year-filter",
-                                options=[{"label": str(year), "value": year} for year in years],
-                                value=years,
-                                multi=True,
-                                clearable=False,
-                            ),
-                            html.Label("Tipo de pedido"),
-                            dcc.Checklist(
-                                id="type-filter",
-                                options=[
-                                    {"label": "SOLIDO", "value": "SOLIDO"},
-                                    {"label": "NO_SOLIDO", "value": "NO_SOLIDO"},
-                                ],
-                                value=["SOLIDO", "NO_SOLIDO"],
-                                inline=True,
-                            ),
-                        ],
-                        className="controls",
-                    ),
+                    html.Div([html.Div("La Gaitana Farms", className="kicker"), html.H1("Ventas generales"), html.P("Informe ejecutivo comercial basado en ventas reales confirmadas.")], className="hero-title"),
+                    html.Div([html.Div("Fuente", className="source-label"), html.Div(source_path or source_dir, className="source-path")], className="source-card"),
                 ],
                 className="hero",
             ),
-            html.Div(id="kpi-strip", className="kpi-strip"),
             html.Div(
                 [
-                    html.Div(dcc.Graph(id="monthly-chart", config={"displayModeBar": False}), className="panel wide"),
-                    html.Div(dcc.Graph(id="mix-chart", config={"displayModeBar": False}), className="panel"),
-                    html.Div(dcc.Graph(id="clients-chart", config={"displayModeBar": False}), className="panel"),
-                    html.Div(dcc.Graph(id="product-chart", config={"displayModeBar": False}), className="panel"),
+                    html.Div([html.Label("Año base"), dcc.Dropdown(id="base-year", options=[{"label": str(y), "value": y} for y in years], value=default_base, clearable=True)], className="control"),
+                    html.Div([html.Label("Año seleccionado"), dcc.Dropdown(id="compare-year", options=[{"label": str(y), "value": y} for y in years], value=default_compare, clearable=False)], className="control"),
+                    html.Div([html.Label("Años visibles"), dcc.Dropdown(id="years", options=[{"label": str(y), "value": y} for y in years], value=years, multi=True, clearable=False)], className="control control-wide"),
+                    html.Div([html.Label("Semanas ISO"), dcc.RangeSlider(id="weeks", min=week_min, max=week_max, value=[week_min, week_max], marks={week_min: str(week_min), week_max: str(week_max)}, tooltip={"placement": "bottom"})], className="control control-wide"),
+                    html.Div([html.Label("Compañía"), dcc.Dropdown(id="companies", options=build_options(df, "NomCompania", top=80), multi=True, placeholder="Todas")], className="control"),
+                    html.Div([html.Label("Cliente"), dcc.Dropdown(id="clients", options=build_options(df, "cod_cliente", "cliente", top=120), multi=True, placeholder="Todos")], className="control"),
+                    html.Div([html.Label("País"), dcc.Dropdown(id="countries", options=build_options(df, "pais"), multi=True, placeholder="Todos")], className="control"),
+                    html.Div([html.Label("Producto"), dcc.Dropdown(id="products", options=build_options(df, "producto"), multi=True, placeholder="Todos")], className="control"),
+                    html.Div([html.Label("Color"), dcc.Dropdown(id="colors", options=build_options(df, "color", top=120), multi=True, placeholder="Todos")], className="control"),
+                    html.Div([html.Label("Tipo operativo"), dcc.Dropdown(id="types", options=build_options(df, "tipo_pedido_operativo"), multi=True, placeholder="Todos")], className="control"),
                 ],
-                className="grid",
+                className="filters",
             ),
+            html.Div(id="metrics", className="metrics-grid"),
             html.Div(
                 [
-                    html.Div(
-                        [
-                            html.H2("Lecturas de negocio"),
-                            html.Ul(id="insight-list"),
-                        ],
-                        className="insights",
-                    ),
-                    html.Div(
-                        [
-                            html.H2("Resumen anual"),
-                            dash_table.DataTable(
-                                id="annual-table",
-                                columns=[
-                                    {"name": "Anio", "id": "anio"},
-                                    {"name": "Tallos", "id": "tallos"},
-                                    {"name": "Ventas USD", "id": "ventas_usd"},
-                                    {"name": "Clientes", "id": "clientes"},
-                                    {"name": "Producto-color", "id": "producto_colores"},
-                                    {"name": "USD/tallo", "id": "usd_tallo"},
-                                ],
-                                page_size=8,
-                                style_as_list_view=True,
-                                style_cell={"fontFamily": "Segoe UI, Arial, sans-serif", "fontSize": 13, "padding": "8px", "textAlign": "left"},
-                                style_header={"fontWeight": "700", "backgroundColor": "#eef2ea"},
-                            ),
-                        ],
-                        className="table-panel",
-                    ),
+                    html.Div([html.Div("¿Cómo vamos frente al año base?", className="panel-title"), dcc.Graph(id="fig-consolidated")], className="panel"),
+                    html.Div([html.Div("Facturación mensual", className="panel-title"), dcc.Graph(id="fig-monthly")], className="panel"),
+                    html.Div([html.Div("Volumen semanal", className="panel-title"), dcc.Graph(id="fig-weekly")], className="panel"),
+                    html.Div([html.Div("Facturación por producto", className="panel-title"), dcc.Graph(id="fig-product-usd")], className="panel"),
+                    html.Div([html.Div("Mix comercial", className="panel-title"), dcc.Graph(id="fig-mix")], className="panel"),
+                    html.Div([html.Div("Precio y oportunidad", className="panel-title"), dcc.Graph(id="fig-price"), dcc.Graph(id="fig-opportunity")], className="panel"),
                 ],
-                className="lower-grid",
+                className="grid-2",
             ),
+            html.Div([html.Div("Lectura estratégica", className="panel-title"), html.Div(id="insights", className="strategy-grid")], className="strategy-panel section-gap"),
             html.Div(
                 [
-                    html.Div(
-                        [
-                            html.H2("Top clientes"),
-                            dash_table.DataTable(
-                                id="client-table",
-                                columns=[
-                                    {"name": "Cliente", "id": "cliente_analisis"},
-                                    {"name": "Tallos", "id": "tallos"},
-                                    {"name": "Ventas USD", "id": "ventas_usd"},
-                                    {"name": "Producto-color", "id": "producto_colores"},
-                                ],
-                                page_size=10,
-                                style_as_list_view=True,
-                                style_cell={"fontFamily": "Segoe UI, Arial, sans-serif", "fontSize": 13, "padding": "8px", "textAlign": "left"},
-                                style_header={"fontWeight": "700", "backgroundColor": "#eef2ea"},
-                            ),
-                        ],
-                        className="table-panel",
-                    ),
-                    html.Div(
-                        [
-                            html.H2("Top producto-color"),
-                            dash_table.DataTable(
-                                id="product-table",
-                                columns=[
-                                    {"name": "Producto-color", "id": "producto_color"},
-                                    {"name": "Tallos", "id": "tallos"},
-                                    {"name": "Ventas USD", "id": "ventas_usd"},
-                                    {"name": "Clientes", "id": "clientes"},
-                                ],
-                                page_size=10,
-                                style_as_list_view=True,
-                                style_cell={"fontFamily": "Segoe UI, Arial, sans-serif", "fontSize": 13, "padding": "8px", "textAlign": "left"},
-                                style_header={"fontWeight": "700", "backgroundColor": "#eef2ea"},
-                            ),
-                        ],
-                        className="table-panel",
-                    ),
+                    html.Div([html.Div("Comparativo por producto", className="panel-title"), html.Div(id="product-table")], className="table-panel"),
+                    html.Div([html.Div("Clientes por facturación", className="panel-title"), html.Div(id="client-table")], className="table-panel"),
+                    html.Div([html.Div("Crecimiento por país", className="panel-title"), html.Div(id="country-table")], className="table-panel"),
+                    html.Div([html.Div("Producto por semana", className="panel-title"), html.Div(id="week-matrix")], className="table-panel"),
                 ],
                 className="table-grid",
             ),
@@ -363,107 +445,102 @@ def build_app(data_path: str | None = None, data_dir: str | None = None) -> Dash
     )
 
     app.index_string = """
-    <!DOCTYPE html>
-    <html>
-        <head>
-            {%metas%}
-            <title>{%title%}</title>
-            {%favicon%}
-            {%css%}
-            <style>
-                body { margin: 0; background: #f5f7f3; color: #1f2933; font-family: Segoe UI, Arial, sans-serif; }
-                .page { max-width: 1500px; margin: 0 auto; padding: 24px; }
-                .hero { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; align-items: end; padding: 28px 0 18px; border-bottom: 1px solid #d9dee7; }
-                .brand { color: #2f6f5e; font-weight: 700; font-size: 14px; text-transform: uppercase; }
-                h1 { margin: 6px 0 8px; font-size: 42px; line-height: 1.05; font-weight: 760; }
-                h2 { margin: 0 0 12px; font-size: 18px; }
-                p { margin: 0; color: #667085; max-width: 760px; font-size: 16px; }
-                .controls { display: grid; gap: 8px; background: #ffffff; border: 1px solid #d9dee7; border-radius: 8px; padding: 16px; }
-                label { font-weight: 700; font-size: 13px; }
-                .kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
-                .kpi { background: #ffffff; border: 1px solid #d9dee7; border-radius: 8px; padding: 16px; min-height: 92px; }
-                .kpi-label { color: #667085; font-size: 13px; font-weight: 700; text-transform: uppercase; }
-                .kpi-value { font-size: 28px; font-weight: 760; margin-top: 8px; }
-                .kpi-detail { color: #667085; font-size: 13px; margin-top: 4px; }
-                .grid { display: grid; grid-template-columns: 1.35fr 0.75fr; gap: 16px; }
-                .panel, .table-panel, .insights { background: #ffffff; border: 1px solid #d9dee7; border-radius: 8px; padding: 12px; min-width: 0; }
-                .wide { grid-column: span 1; }
-                .lower-grid { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 16px; margin-top: 16px; align-items: start; }
-                .table-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-                .insights ul { margin: 0; padding-left: 20px; color: #344054; line-height: 1.55; }
-                @media (max-width: 980px) {
-                    .hero, .grid, .lower-grid, .table-grid { grid-template-columns: 1fr; }
-                    .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-                    h1 { font-size: 34px; }
-                }
-                @media (max-width: 620px) {
-                    .page { padding: 14px; }
-                    .kpi-strip { grid-template-columns: 1fr; }
-                    h1 { font-size: 30px; }
-                }
-            </style>
-        </head>
-        <body>
-            {%app_entry%}
-            <footer>
-                {%config%}
-                {%scripts%}
-                {%renderer%}
-            </footer>
-        </body>
-    </html>
+    <!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>{%favicon%}{%css%}
+    <style>
+    body{margin:0;background:#f3f4f6;color:#1f2937;font-family:Arial,sans-serif}.page{max-width:1540px;margin:0 auto;padding:22px}
+    .hero{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:18px;align-items:end;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:24px;margin-bottom:14px}
+    .kicker{color:#800020;text-transform:uppercase;font-size:13px;font-weight:700;letter-spacing:.04em}h1{margin:5px 0 8px;font-size:42px;line-height:1.05}.hero p{margin:0;color:#667085;font-size:16px}
+    .source-card{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:12px}.source-label{font-size:12px;font-weight:700;color:#667085;text-transform:uppercase}.source-path{font-size:13px;word-break:break-all}
+    .filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:14px}.control-wide{grid-column:span 2}label{font-size:12px;font-weight:700;color:#374151}
+    .metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.metric-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;min-height:96px}.metric-head{display:flex;justify-content:space-between;gap:8px}.metric-title{font-size:12px;font-weight:700;color:#667085;text-transform:uppercase}.metric-value{font-size:28px;font-weight:760;margin-top:10px}.metric-detail{font-size:12px;color:#667085;margin-top:5px}.delta{font-size:12px;font-weight:700;border-radius:999px;padding:3px 7px;background:#eef2f7}.positive{background:#e8f5ef;color:#027a48}.negative{background:#fdecec;color:#b42318}.neutral{background:#eef2f7;color:#667085}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel,.table-panel,.strategy-panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;min-width:0}.panel-title{font-size:16px;font-weight:760;margin:2px 0 10px}.section-gap{margin-top:14px}
+    .strategy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.strategy-card{display:grid;grid-template-columns:44px 1fr;gap:10px;background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:12px}.strategy-index{font-weight:760;color:#800020}.strategy-text{line-height:1.45;color:#374151}
+    .table-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}@media(max-width:1050px){.hero,.filters,.grid-2,.table-grid{grid-template-columns:1fr}.control-wide{grid-column:auto}.metrics-grid{grid-template-columns:1fr 1fr}}@media(max-width:650px){.metrics-grid,.strategy-grid{grid-template-columns:1fr}.page{padding:12px}h1{font-size:32px}}
+    </style></head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>
     """
 
     @app.callback(
-        Output("kpi-strip", "children"),
-        Output("monthly-chart", "figure"),
-        Output("clients-chart", "figure"),
-        Output("product-chart", "figure"),
-        Output("mix-chart", "figure"),
-        Output("insight-list", "children"),
-        Output("annual-table", "data"),
-        Output("client-table", "data"),
-        Output("product-table", "data"),
-        Input("year-filter", "value"),
-        Input("type-filter", "value"),
+        Output("metrics", "children"),
+        Output("fig-consolidated", "figure"),
+        Output("fig-monthly", "figure"),
+        Output("fig-weekly", "figure"),
+        Output("fig-product-usd", "figure"),
+        Output("fig-mix", "figure"),
+        Output("fig-price", "figure"),
+        Output("fig-opportunity", "figure"),
+        Output("insights", "children"),
+        Output("product-table", "children"),
+        Output("client-table", "children"),
+        Output("country-table", "children"),
+        Output("week-matrix", "children"),
+        Input("base-year", "value"),
+        Input("compare-year", "value"),
+        Input("years", "value"),
+        Input("weeks", "value"),
+        Input("companies", "value"),
+        Input("clients", "value"),
+        Input("countries", "value"),
+        Input("products", "value"),
+        Input("colors", "value"),
+        Input("types", "value"),
     )
-    def update_dashboard(selected_years, selected_types):
-        filtered = _filter_frame(frame, selected_years, selected_types)
-        total_tallos = filtered["tallos_demanda"].sum() if not filtered.empty else 0
-        total_ventas = filtered["ventas_usd"].sum() if not filtered.empty else 0
-        clientes = filtered["cliente_analisis"].nunique() if not filtered.empty else 0
-        product_colors = filtered["producto_color"].nunique() if not filtered.empty else 0
-        usd_tallo = total_ventas / total_tallos if total_tallos else 0
-        kpis = [
-            _kpi("Tallos confirmados", _fmt_int(total_tallos), "Volumen despachado filtrado"),
-            _kpi("Ventas", _fmt_usd(total_ventas), f"US$ {usd_tallo:.3f} por tallo"),
-            _kpi("Clientes", _fmt_int(clientes), "Clientes con venta confirmada"),
-            _kpi("Producto-color", _fmt_int(product_colors), "Combinaciones comerciales activas"),
+    def update(base_year, compare_year, years_sel, weeks, companies, clients, countries, products, colors, types):
+        view = filter_frame(df, years_sel, weeks, companies, clients, countries, products, colors, types)
+        ctx = build_context(view, base_year, compare_year)
+        if not ctx.get("ok"):
+            figs = build_figures(view, ctx)
+            return [], *figs.values(), [], table(pd.DataFrame()), table(pd.DataFrame()), table(pd.DataFrame()), table(pd.DataFrame())
+
+        bm, cm = ctx["base_m"], ctx["comp_m"]
+        cards = [
+            metric_card("Ventas USD", money(cm["ventas"], 2), f"Año seleccionado {ctx['compare']}", variation_label(bm["ventas"], cm["ventas"], LOW_USD_BASE_THRESHOLD) if ctx["comparison"] else None),
+            metric_card("Tallos confirmados", money(cm["tallos"], 0), "Volumen real", variation_label(bm["tallos"], cm["tallos"], LOW_STEMS_BASE_THRESHOLD) if ctx["comparison"] else None),
+            metric_card("Precio promedio", f"US$ {money(cm['precio'], 4)}", "USD/tallo ponderado", variation_label(bm["precio"], cm["precio"]) if ctx["comparison"] else None),
+            metric_card("Pedidos", money(cm["pedidos"], 0), "Pedidos distintos", variation_label(bm["pedidos"], cm["pedidos"]) if ctx["comparison"] else None),
+            metric_card("Clientes activos", money(cm["clientes"], 0), "Con venta confirmada", variation_label(bm["clientes"], cm["clientes"]) if ctx["comparison"] else None),
+            metric_card("Productos activos", money(cm["productos"], 0), "Portafolio vendido", variation_label(bm["productos"], cm["productos"]) if ctx["comparison"] else None),
+            metric_card("Venta prom. pedido", f"US$ {money(cm['venta_pedido'], 2)}", "Facturación / pedido"),
+            metric_card("Tallos prom. pedido", money(cm["tallos_pedido"], 0), "Tallos / pedido"),
         ]
-        fig_monthly, fig_clients, fig_product, fig_mix = _build_figures(filtered)
-        annual, client, product = _build_tables(filtered)
-        return kpis, fig_monthly, fig_clients, fig_product, fig_mix, _insights(filtered), annual, client, product
+        figs = build_figures(view, ctx)
+        clients_table = summarize(view, ["cod_cliente", "cliente"]).sort_values("ventas_usd", ascending=False).head(30)
+        clients_table = clients_table.rename(columns={"cod_cliente": "Cod. cliente", "cliente": "Cliente", "ventas_usd": "Facturacion USD", "tallos_confirmados": "Tallos", "pedidos": "Pedidos", "precio_usd_tallo": "USD/tallo"})
+        clients_table = clients_table[["Cod. cliente", "Cliente", "Facturacion USD", "Tallos", "Pedidos", "USD/tallo"]]
+        clients_table["Facturacion USD"] = clients_table["Facturacion USD"].map(lambda v: money(v, 2))
+        clients_table["Tallos"] = clients_table["Tallos"].map(lambda v: money(v, 0))
+        clients_table["USD/tallo"] = clients_table["USD/tallo"].map(lambda v: money(v, 4))
+        return (
+            cards,
+            figs["consolidated"],
+            figs["monthly"],
+            figs["weekly"],
+            figs["product_usd"],
+            figs["mix"],
+            figs["price"],
+            figs["opportunity"],
+            insight_cards(view, ctx),
+            table(product_compare_table(ctx), 12),
+            table(clients_table, 12, [{"column_id": "Facturacion USD", "direction": "desc"}]),
+            table(dimension_growth(view, ctx, ["pais"]), 12),
+            table(product_week_matrix(view), 12, [{"column_id": "Total", "direction": "desc"}]),
+        )
 
     return app
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Dashboard descriptivo de ventas generales LGF.")
+    parser = argparse.ArgumentParser(description="Dashboard ejecutivo de ventas generales LGF.")
     parser.add_argument("--data-path", default=os.getenv("LGF_DATA_PATH"), help="Ruta al historic_sales_acum.csv")
     parser.add_argument("--data-dir", default=os.getenv("LGF_DATA_DIR"), help="Carpeta de respaldo con CSV por anio.")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=8051, type=int)
+    parser.add_argument("--port", default=8052, type=int)
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if args.data_path:
-        os.environ["LGF_DATA_PATH"] = str(Path(args.data_path))
-    if args.data_dir:
-        os.environ["LGF_DATA_DIR"] = str(Path(args.data_dir))
-    app = build_app(data_path=args.data_path, data_dir=args.data_dir)
+    app = make_app(data_path=args.data_path, data_dir=args.data_dir)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 

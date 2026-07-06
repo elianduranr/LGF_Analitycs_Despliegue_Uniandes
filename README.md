@@ -106,6 +106,20 @@ $env:PYTHONPATH="src"
 .\.venv\Scripts\python.exe app\dash_ventas.py --data-path "C:\ruta\a\historic_sales_acum.csv" --host 127.0.0.1 --port 8051
 ```
 
+En Git Bash:
+
+```bash
+bash scripts/run_dash_ventas.sh
+```
+
+Por defecto usa el puerto `8052`. Para cambiar datos o puerto:
+
+```bash
+export LGF_DATA_PATH="/c/ruta/a/historic_sales_acum.csv"
+export LGF_DASH_PORT=8053
+bash scripts/run_dash_ventas.sh
+```
+
 Luego abrir:
 
 ```text
