@@ -354,8 +354,8 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
 
     annual_rows = []
     if ctx["comparison"]:
-        annual_rows.append({"anio": f"Ano base {ctx['base']}", "ventas": ctx["base_m"]["ventas"]})
-    annual_rows.append({"anio": f"Ano seleccionado {ctx['compare']}", "ventas": ctx["comp_m"]["ventas"]})
+        annual_rows.append({"anio": f"Año base {ctx['base']}", "ventas": ctx["base_m"]["ventas"]})
+    annual_rows.append({"anio": f"Año seleccionado {ctx['compare']}", "ventas": ctx["comp_m"]["ventas"]})
     fig_consolidated = px.bar(pd.DataFrame(annual_rows), x="anio", y="ventas", title="Consolidado real USD", color="anio", color_discrete_sequence=CORPORATE_SEQUENCE)
     apply_layout(fig_consolidated, 330)
     fig_consolidated.update_yaxes(title="USD", tickformat=",.2f")
@@ -485,7 +485,7 @@ def insight_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
 def concentration_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
     frame = ctx.get("compare_frame", pd.DataFrame())
     if frame.empty:
-        return [scope_card("Concentracion", "Sin datos", "No hay informacion para el ano seleccionado")]
+        return [scope_card("Concentracion", "Sin datos", "No hay informacion para el año seleccionado")]
     total_tallos = float(frame["tallos_confirmados"].sum())
     total_usd = float(frame["ventas_usd"].sum())
 
@@ -562,11 +562,11 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             ),
             html.Div(
                 [
-                    html.Div([html.Label("Ano base"), dcc.Dropdown(id="base-year", options=[{"label": str(y), "value": y} for y in years], value=default_base, clearable=True)], className="control"),
-                    html.Div([html.Label("Ano comparativo"), dcc.Dropdown(id="compare-year", options=[{"label": str(y), "value": y} for y in years], value=default_compare, clearable=False)], className="control"),
-                    html.Div([html.Label("Anos visibles"), dcc.Dropdown(id="years", options=[{"label": str(y), "value": y} for y in years], value=years, multi=True, clearable=False)], className="control control-wide"),
+                    html.Div([html.Label("Año base"), dcc.Dropdown(id="base-year", options=[{"label": str(y), "value": y} for y in years], value=default_base, clearable=True)], className="control"),
+                    html.Div([html.Label("Año comparativo"), dcc.Dropdown(id="compare-year", options=[{"label": str(y), "value": y} for y in years], value=default_compare, clearable=False)], className="control"),
+                    html.Div([html.Label("Años visibles"), dcc.Dropdown(id="years", options=[{"label": str(y), "value": y} for y in years], value=years, multi=True, clearable=False)], className="control control-wide"),
                     html.Div([html.Label("Semanas ISO"), dcc.RangeSlider(id="weeks", min=week_min, max=week_max, value=[week_min, week_max], marks={week_min: str(week_min), week_max: str(week_max)}, tooltip={"placement": "bottom"})], className="control control-wide"),
-                    html.Div([html.Label("Compania"), dcc.Dropdown(id="companies", options=build_options(df, "NomCompania", top=80), multi=True, placeholder="Todas")], className="control"),
+                    html.Div([html.Label("Compañía"), dcc.Dropdown(id="companies", options=build_options(df, "NomCompania", top=80), multi=True, placeholder="Todas")], className="control"),
                     html.Div([html.Label("Cliente"), dcc.Dropdown(id="clients", options=build_options(df, "cod_cliente", "cliente", top=120), multi=True, placeholder="Todos")], className="control"),
                     html.Div([html.Label("Pais"), dcc.Dropdown(id="countries", options=build_options(df, "pais"), multi=True, placeholder="Todos")], className="control"),
                     html.Div([html.Label("Producto"), dcc.Dropdown(id="products", options=build_options(df, "producto"), multi=True, placeholder="Todos")], className="control"),
@@ -578,7 +578,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             html.Div(id="metrics", className="metrics-grid"),
             html.Div(
                 [
-                    html.Div([html.Div("Comparativo contra ano base", className="panel-title"), dcc.Graph(id="fig-consolidated")], className="panel"),
+                    html.Div([html.Div("Comparativo contra año base", className="panel-title"), dcc.Graph(id="fig-consolidated")], className="panel"),
                     html.Div([html.Div("Facturacion mensual", className="panel-title"), dcc.Graph(id="fig-monthly")], className="panel"),
                     html.Div([html.Div("Volumen semanal", className="panel-title"), dcc.Graph(id="fig-weekly")], className="panel"),
                     html.Div([html.Div("Facturacion por producto", className="panel-title"), dcc.Graph(id="fig-product-usd")], className="panel"),
@@ -700,7 +700,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
 
         bm, cm = ctx["base_m"], ctx["comp_m"]
         cards = [
-            metric_card("Ventas USD", money(cm["ventas"], 2), f"Ano seleccionado {ctx['compare']}", variation_label(bm["ventas"], cm["ventas"], LOW_USD_BASE_THRESHOLD) if ctx["comparison"] else None),
+            metric_card("Ventas USD", money(cm["ventas"], 2), f"Año seleccionado {ctx['compare']}", variation_label(bm["ventas"], cm["ventas"], LOW_USD_BASE_THRESHOLD) if ctx["comparison"] else None),
             metric_card("Tallos confirmados", money(cm["tallos"], 0), "Volumen real", variation_label(bm["tallos"], cm["tallos"], LOW_STEMS_BASE_THRESHOLD) if ctx["comparison"] else None),
             metric_card("Precio promedio", f"US$ {money(cm['precio'], 4)}", "USD/tallo ponderado", variation_label(bm["precio"], cm["precio"]) if ctx["comparison"] else None),
             metric_card("Pedidos", money(cm["pedidos"], 0), "Pedidos distintos", variation_label(bm["pedidos"], cm["pedidos"]) if ctx["comparison"] else None),
