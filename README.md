@@ -24,7 +24,11 @@ cerrado a dos frentes:
 - `reports/reporte_trabajo_equipo.md`: responsabilidades del equipo.
 - `src/lgf_despliegue/`: primera version del codigo reusable.
 - `scripts/run_pipeline.py`: ejecutor de ventas generales y forecast con MLflow.
+- `app/main.py`: API FastAPI para salud, ventas generales e inferencia baseline.
+- `Dockerfile` y `docker-compose.yml`: ejecucion contenedorizada.
+- `tox.ini`: ambientes `train`, `test_package`, `test_app` y `run` como en los talleres.
 - `docs/FLUJO_TRABAJO.md`: ramas, roles y prompts separados para Elian/Julian.
+- `docs/DESPLIEGUE_DATOS_DOCKER.md`: guia de Docker, API y datos en VM.
 
 ## Ejecutar
 
@@ -50,6 +54,42 @@ Ejecutar ventas generales y comparacion de modelos con MLflow:
 
 Las salidas quedan en `outputs/` y los experimentos de MLflow en `mlruns/`.
 Ambas carpetas estan ignoradas por Git.
+
+## API y Docker
+
+Flujo tipo talleres:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\tox.exe run -e test_package
+.\.venv\Scripts\tox.exe run -e test_app
+.\.venv\Scripts\tox.exe run -e run
+```
+
+Ejecucion local de la API:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:LGF_DATA_DIR="../bases de datos historicas"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+Ejecucion con Docker:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
+Rutas principales:
+
+- `GET /health`
+- `GET /ventas/resumen`
+- `POST /forecast/solidos`
+- `/docs` para Swagger.
+
+La carpeta de datos se configura con `LGF_DATA_DIR` o, en Docker Compose, con
+`LGF_HOST_DATA_DIR` en `.env`.
 
 ## Versionamiento de modelos
 

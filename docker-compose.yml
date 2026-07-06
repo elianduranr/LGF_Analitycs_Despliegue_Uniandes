@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    container_name: lgf_despliegue_api
+    ports:
+      - "8001:8001"
+    environment:
+      LGF_DATA_DIR: /data
+      LGF_OUTPUT_DIR: /app/outputs
+      MLFLOW_TRACKING_URI: file:/app/mlruns
+    volumes:
+      - ${LGF_HOST_DATA_DIR:-../bases de datos historicas}:/data:ro
+      - ./outputs:/app/outputs
+      - ./mlruns:/app/mlruns
