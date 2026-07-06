@@ -1,0 +1,18 @@
+Entrega 1
+86 / 100
+86%
+Comentario general
+Problema
+que abordarán y su
+contexto (_/15)	Comentarios	Pregunta de
+negocio y
+alcance del
+proyecto (_/15)	Comentarios	Descripción
+de conjuntos
+de datos a
+emplear. (_/10)	Comentarios	Exploración
+de los datos. (_/30)	Comentarios	Maqueta del prototipo (_/20)	Comentarios	Reporte de
+trabajo en
+equipo. (_/10)	Comentarios	Nota Final
+15	Muy bien!	9	Definen la pregunta de negocio pero no el alcance del proyecto.	7	Bien, vale la pena agregar la descripción de qué información trae cada variable. Ejemplos:  capuchón,
+comida, receta, tipo de pedido, moneda y valor de venta,  --> ¿qué significa cada una de estas cosas? 	25	Muy bien! Pueden incluir conclusiones más de negocios y explicativas, el negocio de las flores no es conocimiento común, así que vale la pena hacer un deepdive más profundo. Las gráficas las pueden hacer más bonitas y relacionarlas con los colores de las flores.	20	Muy bien!	10	Muy bien!	86
