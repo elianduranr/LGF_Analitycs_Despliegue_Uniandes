@@ -1,0 +1,14 @@
+dvc_storage/
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+mlruns/
+outputs/
+resultados/
+*.log
+
+# Bases historicas completas: se mantienen locales o por DVC.
+datos/raw/*.csv
+!datos/raw/*.dvc
+
