@@ -9,12 +9,15 @@ COLUMN_ALIASES = {
     "fecha": ["fecha", "FECHA", "Fecha"],
     "cod_cliente": ["cod_cliente", "CODCUSTOM", "CodCustom"],
     "cliente": ["cliente", "CLIENTE", "Cliente"],
+    "NomCompania": ["NomCompania", "NOMCOMPANIA", "Compania", "COMPANIA"],
     "cliente_consolidado": ["cliente_consolidado", "CLIENTECONSOL", "ClienteConsol"],
     "producto": ["producto", "PRODUCTO", "Producto"],
     "color": ["color", "COLOR", "Color", "NomColor"],
     "pais": ["pais", "PAIS", "Pais"],
     "ciudad": ["ciudad", "CIUDAD", "Ciudad"],
     "estado": ["estado", "ESTADO", "Estado"],
+    "pedido": ["pedido", "PEDIDO", "Pedido"],
+    "tipo_pedido_operativo": ["tipo_pedido_operativo", "TIPO_PEDIDO_OPERATIVO"],
     "tipo_empaque": ["tipo_empaque", "TIPEMPAQUE", "TipoEmpaque"],
     "tipo_orden_empaque": ["tipo_orden_empaque", "TIPORDENEMPAQUE", "TipoOrdenEmpaque"],
     "empaque": ["empaque", "EMPAQUE", "Empaque"],
@@ -23,6 +26,7 @@ COLUMN_ALIASES = {
     "tallos_total": ["tallos_total", "TOTALTALLOS", "TotalTallos"],
     "ventas_usd": ["ventas_usd", "VENTAS_USD", "Ventas_USD"],
     "valor_total": ["valor_total", "VALORTOTAL", "ValorTotal"],
+    "valor_total_original": ["valor_total_original", "VALORTOTAL", "ValorTotal"],
     "moneda": ["moneda", "NomMoneda", "NOMMONEDA"],
 }
 
@@ -57,12 +61,15 @@ def clean_sales_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "fecha",
         "cod_cliente",
         "cliente",
+        "NomCompania",
         "cliente_consolidado",
         "producto",
         "color",
         "pais",
         "ciudad",
         "estado",
+        "pedido",
+        "tipo_pedido_operativo",
         "tipo_empaque",
         "tipo_orden_empaque",
         "empaque",
@@ -71,6 +78,7 @@ def clean_sales_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "tallos_total",
         "ventas_usd",
         "valor_total",
+        "valor_total_original",
         "moneda",
     ]
     for col in required:
@@ -79,18 +87,20 @@ def clean_sales_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     out["fecha"] = pd.to_datetime(out["fecha"], errors="coerce")
     out = out[out["fecha"].notna()].copy()
-    for col in ["tallos_pedidos", "tallos_confirmados", "tallos_total", "ventas_usd", "valor_total"]:
+    for col in ["tallos_pedidos", "tallos_confirmados", "tallos_total", "ventas_usd", "valor_total", "valor_total_original"]:
         out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0)
 
     for col in [
         "cod_cliente",
         "cliente",
+        "NomCompania",
         "cliente_consolidado",
         "producto",
         "color",
         "pais",
         "ciudad",
         "estado",
+        "tipo_pedido_operativo",
         "tipo_empaque",
         "tipo_orden_empaque",
         "empaque",
@@ -112,6 +122,9 @@ def clean_sales_frame(frame: pd.DataFrame) -> pd.DataFrame:
         + out["empaque"].astype(str)
     )
     out["es_solido"] = text_for_type.str.contains("solido|solid", regex=True, na=False)
+    source_type = out["tipo_pedido_operativo"].where(~out["tipo_pedido_operativo"].isin(["sin_info", "nan", "none", ""]), "")
+    out["tipo_pedido_operativo"] = source_type.str.upper().where(source_type.ne(""), out["es_solido"].map({True: "SOLIDO", False: "NO_SOLIDO"}))
+    out["pedidos"] = out["pedido"].where(~out["pedido"].isin(["sin_info", "nan", "none", ""]), out.index.astype(str))
 
     iso = out["fecha"].dt.isocalendar()
     out["anio"] = iso.year.astype(int)
