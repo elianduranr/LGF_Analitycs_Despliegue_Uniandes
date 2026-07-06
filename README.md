@@ -126,13 +126,36 @@ Luego abrir:
 http://127.0.0.1:8051
 ```
 
+## Dashboard Forecast SOLIDO
+
+Primero ejecutar entrenamiento/evaluacion para generar `outputs/forecast/` y
+registrar experimentos en MLflow:
+
+```powershell
+$env:PYTHONPATH="src"
+$env:LGF_DATA_PATH="C:\ruta\a\historic_sales_acum.csv"
+.\.venv\Scripts\python.exe scripts\train_pipeline.py
+```
+
+Luego abrir el tablero de forecast:
+
+```powershell
+$env:LGF_DATA_PATH="C:\ruta\a\historic_sales_acum.csv"
+.\scripts\run_dash_forecast.ps1
+```
+
+Por defecto usa `http://127.0.0.1:8053`. El tablero lee las metricas, backtesting
+y predicciones futuras desde `outputs/forecast/`; si aun no existen, muestra la
+serie semanal SOLIDO para orientar el entrenamiento.
+
 ## Versionamiento de modelos
 
 El modulo de forecast registra en MLflow:
 
 - Modelo probado.
 - Parametros principales.
-- MAE, RMSE y WAPE.
+- Backtesting por ventanas temporales.
+- MAE, RMSE y WAPE por fold y promedio.
 - Artefacto del modelo cuando aplica.
 - Archivos CSV de evaluacion en `outputs/forecast/`.
 
