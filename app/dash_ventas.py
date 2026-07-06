@@ -22,6 +22,22 @@ CORPORATE_SEQUENCE = [CORPORATE_BURGUNDY, "#4E79A7", "#59A14F", "#F28E2B", "#B07
 LOW_USD_BASE_THRESHOLD = 1_000.0
 LOW_STEMS_BASE_THRESHOLD = 1_000.0
 MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+FLOWER_COLOR_MAP = {
+    "white": "#E5E7EB",
+    "red": "#C1121F",
+    "hot pink": "#EC4899",
+    "light pink": "#F9A8D4",
+    "pink": "#F472B6",
+    "green": "#59A14F",
+    "orange": "#F28E2B",
+    "peach": "#FDBA74",
+    "lavender": "#A78BFA",
+    "purple": "#7C3AED",
+    "yellow": "#F2C94C",
+    "cream": "#F7E7CE",
+    "burgundy": CORPORATE_BURGUNDY,
+    "bicolor burgundy": CORPORATE_BURGUNDY,
+}
 
 
 def money(value: float, decimals: int = 0) -> str:
@@ -75,6 +91,14 @@ def apply_layout(fig: go.Figure, height: int = 360) -> go.Figure:
     fig.update_xaxes(gridcolor="#E5E7EB", zerolinecolor="#D1D5DB")
     fig.update_yaxes(gridcolor="#E5E7EB", zerolinecolor="#D1D5DB")
     return fig
+
+
+def flower_color(value: object, index: int = 0) -> str:
+    text = str(value or "").strip().lower()
+    for key, color in FLOWER_COLOR_MAP.items():
+        if key in text:
+            return color
+    return CORPORATE_SEQUENCE[index % len(CORPORATE_SEQUENCE)]
 
 
 def empty_figure(title: str) -> go.Figure:
@@ -133,6 +157,13 @@ def metric_card(title: str, value: str, detail: str = "", delta: str | None = No
             html.Div(detail, className="metric-detail"),
         ],
         className="metric-card",
+    )
+
+
+def scope_card(label: str, value: str, detail: str = "") -> html.Div:
+    return html.Div(
+        [html.Div(label, className="scope-label"), html.Div(value, className="scope-value"), html.Div(detail, className="scope-detail")],
+        className="scope-card",
     )
 
 
@@ -299,6 +330,9 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
             "mix": "Mix por producto",
             "price": "Precio por producto",
             "opportunity": "Matriz de oportunidad",
+            "color": "Color comercial",
+            "country": "Mercados destino",
+            "product_color": "Producto-color",
         }.items()}
 
     annual_rows = []
@@ -349,7 +383,62 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
     fig_opp.update_xaxes(title="Tallos", tickformat=",d")
     fig_opp.update_yaxes(title="USD/tallo", tickformat=",.4f")
 
-    return {"consolidated": fig_consolidated, "monthly": fig_monthly, "weekly": fig_weekly, "product_usd": fig_product_usd, "mix": fig_mix, "price": fig_price, "opportunity": fig_opp}
+    colors = ctx["compare_frame"].groupby("color", as_index=False).agg(tallos=("tallos_confirmados", "sum"), ventas_usd=("ventas_usd", "sum")).sort_values("tallos", ascending=False).head(14)
+    color_map = {row["color"]: flower_color(row["color"], idx) for idx, row in colors.reset_index(drop=True).iterrows()}
+    fig_color = px.bar(
+        colors.sort_values("tallos"),
+        y="color",
+        x="tallos",
+        orientation="h",
+        title="Colores comerciales con mayor volumen",
+        color="color",
+        color_discrete_map=color_map,
+        hover_data=["ventas_usd"],
+    )
+    apply_layout(fig_color, 390)
+    fig_color.update_xaxes(title="Tallos", tickformat=",d")
+    fig_color.update_yaxes(title="")
+
+    country = ctx["compare_frame"].groupby("pais", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos=("tallos_confirmados", "sum"), clientes=("cod_cliente", "nunique")).sort_values("ventas_usd", ascending=False).head(14)
+    fig_country = px.bar(
+        country.sort_values("ventas_usd"),
+        y="pais",
+        x="ventas_usd",
+        orientation="h",
+        title="Mercados destino por facturación",
+        color_discrete_sequence=["#4E79A7"],
+        hover_data=["tallos", "clientes"],
+    )
+    apply_layout(fig_country, 390)
+    fig_country.update_xaxes(title="Ventas USD", tickformat=",.2f")
+    fig_country.update_yaxes(title="")
+
+    pc = ctx["compare_frame"].groupby("producto_color", as_index=False).agg(tallos=("tallos_confirmados", "sum"), ventas_usd=("ventas_usd", "sum"), clientes=("cod_cliente", "nunique")).sort_values("tallos", ascending=False).head(16)
+    fig_product_color = px.bar(
+        pc.sort_values("tallos"),
+        y="producto_color",
+        x="tallos",
+        orientation="h",
+        title="Producto-color: demanda accionable",
+        color_discrete_sequence=[CORPORATE_BURGUNDY],
+        hover_data=["ventas_usd", "clientes"],
+    )
+    apply_layout(fig_product_color, 440)
+    fig_product_color.update_xaxes(title="Tallos", tickformat=",d")
+    fig_product_color.update_yaxes(title="")
+
+    return {
+        "consolidated": fig_consolidated,
+        "monthly": fig_monthly,
+        "weekly": fig_weekly,
+        "product_usd": fig_product_usd,
+        "mix": fig_mix,
+        "price": fig_price,
+        "opportunity": fig_opp,
+        "color": fig_color,
+        "country": fig_country,
+        "product_color": fig_product_color,
+    }
 
 
 def insight_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
@@ -370,7 +459,32 @@ def insight_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
         items.append(f"Producto líder por facturación: {top_product.index[0]} con {money(top_product.iloc[0], 2)} USD.")
     if not top_client.empty:
         items.append(f"Cliente líder por facturación: {top_client.index[0]} con {money(top_client.iloc[0], 2)} USD.")
+    top_color = ctx["compare_frame"].groupby("color")["tallos_confirmados"].sum().sort_values(ascending=False).head(1)
+    if not top_color.empty:
+        items.append(f"Color comercial líder por volumen: {top_color.index[0]} con {money(top_color.iloc[0], 0)} tallos.")
     return [html.Div([html.Div(f"{idx:02d}", className="strategy-index"), html.Div(text, className="strategy-text")], className="strategy-card") for idx, text in enumerate(items[:5], 1)]
+
+
+def concentration_cards(view: pd.DataFrame, ctx: dict) -> list[html.Div]:
+    frame = ctx.get("compare_frame", pd.DataFrame())
+    if frame.empty:
+        return [scope_card("Concentración", "Sin datos", "No hay información para el año seleccionado")]
+    total_tallos = float(frame["tallos_confirmados"].sum())
+    total_usd = float(frame["ventas_usd"].sum())
+
+    def share(group_col: str, value_col: str, top_n: int) -> float:
+        if frame.empty or group_col not in frame or total_tallos <= 0:
+            return 0.0
+        grouped = frame.groupby(group_col)[value_col].sum().sort_values(ascending=False)
+        denom = total_tallos if value_col == "tallos_confirmados" else total_usd
+        return float(grouped.head(top_n).sum() / denom) if denom else 0.0
+
+    return [
+        scope_card("Top 5 clientes", percent(share("cod_cliente", "ventas_usd", 5)).replace("+", ""), "Participación en ventas USD"),
+        scope_card("Top 5 productos", percent(share("producto", "tallos_confirmados", 5)).replace("+", ""), "Participación en tallos"),
+        scope_card("Top 5 colores", percent(share("color", "tallos_confirmados", 5)).replace("+", ""), "Lectura de mix floral"),
+        scope_card("Países activos", money(frame["pais"].nunique(), 0), "Mercados con venta confirmada"),
+    ]
 
 
 def build_options(df: pd.DataFrame, column: str, label_col: str | None = None, top: int | None = None) -> list[dict]:
@@ -433,6 +547,21 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             html.Div([html.Div("Lectura estratégica", className="panel-title"), html.Div(id="insights", className="strategy-grid")], className="strategy-panel section-gap"),
             html.Div(
                 [
+                    html.Div("Concentración y alcance", className="panel-title"),
+                    html.Div(id="scope-cards", className="scope-strip"),
+                ],
+                className="strategy-panel section-gap",
+            ),
+            html.Div(
+                [
+                    html.Div([html.Div("Producto-color accionable", className="panel-title"), dcc.Graph(id="fig-product-color")], className="panel"),
+                    html.Div([html.Div("Color comercial", className="panel-title"), dcc.Graph(id="fig-color")], className="panel"),
+                    html.Div([html.Div("Mercados destino", className="panel-title"), dcc.Graph(id="fig-country")], className="panel panel-wide"),
+                ],
+                className="grid-2 section-gap",
+            ),
+            html.Div(
+                [
                     html.Div([html.Div("Comparativo por producto", className="panel-title"), html.Div(id="product-table")], className="table-panel"),
                     html.Div([html.Div("Clientes por facturación", className="panel-title"), html.Div(id="client-table")], className="table-panel"),
                     html.Div([html.Div("Crecimiento por país", className="panel-title"), html.Div(id="country-table")], className="table-panel"),
@@ -469,6 +598,10 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
         Output("fig-price", "figure"),
         Output("fig-opportunity", "figure"),
         Output("insights", "children"),
+        Output("scope-cards", "children"),
+        Output("fig-product-color", "figure"),
+        Output("fig-color", "figure"),
+        Output("fig-country", "figure"),
         Output("product-table", "children"),
         Output("client-table", "children"),
         Output("country-table", "children"),
@@ -489,7 +622,25 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
         ctx = build_context(view, base_year, compare_year)
         if not ctx.get("ok"):
             figs = build_figures(view, ctx)
-            return [], *figs.values(), [], table(pd.DataFrame()), table(pd.DataFrame()), table(pd.DataFrame()), table(pd.DataFrame())
+            return (
+                [],
+                figs["consolidated"],
+                figs["monthly"],
+                figs["weekly"],
+                figs["product_usd"],
+                figs["mix"],
+                figs["price"],
+                figs["opportunity"],
+                [],
+                [],
+                figs["product_color"],
+                figs["color"],
+                figs["country"],
+                table(pd.DataFrame()),
+                table(pd.DataFrame()),
+                table(pd.DataFrame()),
+                table(pd.DataFrame()),
+            )
 
         bm, cm = ctx["base_m"], ctx["comp_m"]
         cards = [
@@ -519,6 +670,10 @@ def make_app(data_path: str | None = None, data_dir: str | None = None) -> Dash:
             figs["price"],
             figs["opportunity"],
             insight_cards(view, ctx),
+            concentration_cards(view, ctx),
+            figs["product_color"],
+            figs["color"],
+            figs["country"],
             table(product_compare_table(ctx), 12),
             table(clients_table, 12, [{"column_id": "Facturacion USD", "direction": "desc"}]),
             table(dimension_growth(view, ctx, ["pais"]), 12),
