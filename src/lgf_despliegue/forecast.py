@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -277,7 +278,11 @@ def _log_mlflow_runs(
 ) -> None:
     import mlflow
 
-    mlflow.set_tracking_uri(str(Path(tracking_uri).resolve()))
+    parsed_uri = urlparse(str(tracking_uri))
+    if parsed_uri.scheme in {"http", "https", "file", "sqlite", "postgresql", "mysql", "mssql", "databricks", "databricks-uc", "uc"}:
+        mlflow.set_tracking_uri(str(tracking_uri))
+    else:
+        mlflow.set_tracking_uri(Path(tracking_uri).resolve().as_uri())
     mlflow.set_experiment(config.experiment_name)
 
     for _, row in evaluation.iterrows():

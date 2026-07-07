@@ -6,6 +6,9 @@ __pycache__/
 mlruns/
 outputs/
 resultados/
+build/
+dist/
+*.egg-info/
 *.log
 
 # Bases historicas completas: se mantienen locales o por DVC.

@@ -121,7 +121,7 @@ def clean_sales_frame(frame: pd.DataFrame) -> pd.DataFrame:
         + " "
         + out["empaque"].astype(str)
     )
-    out["es_solido"] = text_for_type.str.contains("solido|solid", regex=True, na=False)
+    out["es_solido"] = text_for_type.str.contains("s[oó]lido|solid", regex=True, na=False)
     source_type = out["tipo_pedido_operativo"].where(~out["tipo_pedido_operativo"].isin(["sin_info", "nan", "none", ""]), "")
     out["tipo_pedido_operativo"] = source_type.str.upper().where(source_type.ne(""), out["es_solido"].map({True: "SOLIDO", False: "NO_SOLIDO"}))
     out["pedidos"] = out["pedido"].where(~out["pedido"].isin(["sin_info", "nan", "none", ""]), out.index.astype(str))
