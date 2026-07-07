@@ -152,7 +152,21 @@ def make_app(data_path: str | None = None, data_dir: str | None = None, output_d
         [
             html.Div(
                 [
-                    html.Div([html.Div("La Gaitana Farms", className="kicker"), html.H1("Forecast SOLIDO"), html.P("Versionamiento MLflow, backtesting y lectura ejecutiva de demanda semanal.")], className="hero-title"),
+                    html.Div(
+                        [
+                            html.Div("La Gaitana Farms", className="kicker"),
+                            html.H1("Forecast SOLIDO"),
+                            html.P("Versionamiento MLflow, backtesting y lectura ejecutiva de demanda semanal."),
+                            html.Div(
+                                [
+                                    html.A("Ventas generales", href="http://127.0.0.1:8052", className="nav-link"),
+                                    html.A("Forecast SOLIDO", href="http://127.0.0.1:8053", className="nav-link active"),
+                                ],
+                                className="nav-links",
+                            ),
+                        ],
+                        className="hero-title",
+                    ),
                     html.Div([html.Div("Fuente", className="source-label"), html.Div(source_path or source_dir, className="source-path")], className="source-card"),
                 ],
                 className="hero",
@@ -186,6 +200,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None, output_d
     body{margin:0;background:#f4f6f8;color:#17202a;font-family:Inter,Arial,sans-serif}.page{max-width:1560px;margin:0 auto;padding:22px}
     .hero{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:18px;align-items:end;background:linear-gradient(135deg,#800020 0%,#9b1b3f 45%,#4e79a7 100%);color:#fff;border:1px solid #74122b;border-radius:8px;padding:26px 28px;margin-bottom:14px;box-shadow:0 14px 30px rgba(23,32,42,.12)}
     .kicker{color:#f8d7df;text-transform:uppercase;font-size:12px;font-weight:800;letter-spacing:.08em}h1{margin:5px 0 8px;font-size:42px;line-height:1.05;letter-spacing:0}.hero p{margin:0;color:#f6e7ec;font-size:16px;max-width:760px}
+    .nav-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.nav-link{display:inline-flex;align-items:center;min-height:34px;padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.35);color:#fff;text-decoration:none;font-size:13px;font-weight:800;background:rgba(255,255,255,.10)}.nav-link.active{background:#fff;color:#800020}
     .source-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:13px}.source-label{font-size:11px;font-weight:800;color:#f8d7df;text-transform:uppercase}.source-path{font-size:13px;word-break:break-all;color:#fff}.dark{color:#374151}
     .filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;background:#fff;border:1px solid #d9dee7;border-left:5px solid #800020;border-radius:8px;padding:14px;margin-bottom:14px}.control-wide{grid-column:span 2}label{display:block;font-size:11px;font-weight:800;color:#374151;text-transform:uppercase;margin-bottom:4px}
     .metrics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.metric-card{background:#fff;border:1px solid #d9dee7;border-top:4px solid #800020;border-radius:8px;padding:13px;min-height:96px}.metric-head{display:flex;justify-content:space-between;gap:8px}.metric-title{font-size:11px;font-weight:800;color:#667085;text-transform:uppercase}.metric-value{font-size:24px;font-weight:800;margin-top:10px;color:#17202a}.metric-detail{font-size:12px;color:#667085;margin-top:5px}.delta{font-size:12px;font-weight:800;border-radius:999px;padding:3px 7px;background:#eef2f7}
