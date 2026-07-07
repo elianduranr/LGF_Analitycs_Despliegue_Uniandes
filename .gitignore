@@ -6,6 +6,7 @@ __pycache__/
 mlruns/
 outputs/
 resultados/
+Pantallazos/
 build/
 dist/
 *.egg-info/

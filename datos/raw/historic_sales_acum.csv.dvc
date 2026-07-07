@@ -1,0 +1,5 @@
+outs:
+- md5: 3ee2720cb6c5c4208b0a75d12bf2f352
+  size: 1075446700
+  hash: md5
+  path: historic_sales_acum.csv

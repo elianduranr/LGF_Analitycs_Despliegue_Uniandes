@@ -1,4 +1,6 @@
 [core]
-    remote = localstorage
+    remote = awsremote
 ['remote "localstorage"']
     url = ../dvc_storage
+['remote "awsremote"']
+    url = s3://lgf-dvc-elian-808797956946
