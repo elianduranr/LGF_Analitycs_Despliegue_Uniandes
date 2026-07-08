@@ -1,0 +1,5 @@
+outs:
+- md5: 8a8c1242f3ea8a0d31304d57cda70592
+  size: 13863
+  hash: md5
+  path: demanda_semanal_solidos.csv
