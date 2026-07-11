@@ -31,25 +31,20 @@ La rama estable debe ser `main`.
 5. Elian valida si las salidas tienen sentido para ventas, clientes, producto, color y temporada.
 6. Antes de unir a `main`, ejecutar el pipeline al menos con `--skip-forecast`; para cierre de modelo, ejecutar completo.
 
-## Prompts separados recomendados
+## Distribucion de responsabilidades
 
-### Prompt para Elian
+### Elian
 
-Trabaja solo en la rama `feature/ventas-generales-elian`. Mejora las salidas de
-ventas generales del proyecto reducido: tablas, graficas, conclusiones de
-negocio y diccionario. No modifiques el modulo de forecast salvo que sea una
-correccion minima de datos compartidos.
+Responsable del contexto y la validacion de negocio, las salidas de ventas
+generales, los tableros, DVC, el despliegue y la organizacion de evidencias.
 
-### Prompt para Julian
+### Julian
 
-Trabaja solo en la rama `feature/mlflow-forecast-julian`. Mejora el modulo de
-forecast SOLIDO con MLflow: agrega modelos, backtesting, metricas, parametros y
-criterio de seleccion. No modifiques el informe de negocio salvo que necesites
-agregar resultados tecnicos.
+Responsable del forecast SOLIDO, el backtesting, la comparacion de modelos, las
+metricas y el seguimiento de experimentos en MLflow.
 
-### Prompt de integracion
+### Integracion y revision
 
-Integra `feature/ventas-generales-elian` y `feature/mlflow-forecast-julian` en
-`main`. Resuelve conflictos preservando las salidas de negocio de Elian y las
-metricas/versionamiento de Julian. Actualiza README, reporte y evidencias de
-ejecucion.
+Las ramas de trabajo se revisan antes de integrarse en `main`. La revision final
+incluye pruebas del paquete y la API, validacion de tableros, revision de
+metricas y comprobacion de los soportes de la entrega.

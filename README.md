@@ -28,7 +28,7 @@ cerrado a dos frentes:
 - `app/dash_ventas.py`: tablero descriptivo de ventas generales.
 - `Dockerfile` y `docker-compose.yml`: ejecucion contenedorizada.
 - `tox.ini`: ambientes `train`, `test_package`, `test_app` y `run` como en los talleres.
-- `docs/FLUJO_TRABAJO.md`: ramas, roles y prompts separados para Elian/Julian.
+- `docs/FLUJO_TRABAJO.md`: ramas, responsabilidades y proceso de integracion del equipo.
 - `docs/DESPLIEGUE_DATOS_DOCKER.md`: guia de Docker, API y datos en VM.
 
 ## Ejecutar
