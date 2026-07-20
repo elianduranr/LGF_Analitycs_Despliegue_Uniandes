@@ -13,3 +13,52 @@ services:
       - ${LGF_HOST_DATA_DIR:-../bases de datos historicas}:/data:ro
       - ./outputs:/app/outputs
       - ./mlruns:/app/mlruns
+
+  ventas:
+    build: .
+    container_name: lgf_despliegue_ventas
+    command: ["python", "app/dash_ventas.py", "--data-path", "/data/${LGF_ACUM_FILE:-historic_sales_acum.csv}", "--host", "0.0.0.0", "--port", "8052"]
+    ports:
+      - "8052:8052"
+    environment:
+      LGF_DATA_PATH: /data/${LGF_ACUM_FILE:-historic_sales_acum.csv}
+      LGF_OUTPUT_DIR: /app/outputs
+    volumes:
+      - ${LGF_HOST_DATA_DIR:-../bases de datos historicas}:/data:ro
+      - ./outputs:/app/outputs
+
+  forecast:
+    build: .
+    container_name: lgf_despliegue_forecast
+    command: ["python", "app/dash_forecast.py", "--data-path", "/data/${LGF_ACUM_FILE:-historic_sales_acum.csv}", "--output-dir", "/app/outputs", "--api-url", "http://api:8001", "--host", "0.0.0.0", "--port", "8053"]
+    ports:
+      - "8053:8053"
+    environment:
+      LGF_DATA_PATH: /data/${LGF_ACUM_FILE:-historic_sales_acum.csv}
+      LGF_OUTPUT_DIR: /app/outputs
+      LGF_API_URL: http://api:8001
+    volumes:
+      - ${LGF_HOST_DATA_DIR:-../bases de datos historicas}:/data:ro
+      - ./outputs:/app/outputs
+    depends_on:
+      - api
+
+  dashboard:
+    build: .
+    container_name: lgf_despliegue_dashboard
+    command:
+      - python
+      - app/dashboard_integrado.py
+      - --ventas-url
+      - http://${LGF_PUBLIC_HOST:-127.0.0.1}:8052
+      - --forecast-url
+      - http://${LGF_PUBLIC_HOST:-127.0.0.1}:8053
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8050"
+    ports:
+      - "8050:8050"
+    depends_on:
+      - ventas
+      - forecast
