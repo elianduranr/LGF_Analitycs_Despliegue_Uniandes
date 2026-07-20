@@ -13,7 +13,7 @@ def make_app(ventas_url: str, forecast_url: str) -> Dash:
                 [
                     html.Div("La Gaitana Farms", className="kicker"),
                     html.H1("La Gaitana Farms"),
-                    html.P("Tablero integrado de ventas generales y forecast SOLIDO para la Entrega 2."),
+                    html.P("Producto analítico integrado: ventas generales, API y forecast SOLIDO — Entrega Final."),
                 ],
                 className="hero",
             ),

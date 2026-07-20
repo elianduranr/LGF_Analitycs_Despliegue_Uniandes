@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import pandas as pd
 import plotly.express as px
@@ -60,6 +63,32 @@ def prepare_dashboard_data(data_path: str | None, data_dir: str | None, output_d
     if data["weekly"].empty:
         data["weekly"] = load_weekly_from_data(data_path, data_dir)
     return data
+
+
+def request_api_forecast(api_url: str, horizon_weeks: int) -> tuple[pd.DataFrame, dict]:
+    endpoint = f"{api_url.rstrip('/')}/forecast/solidos"
+    request = Request(
+        endpoint,
+        data=json.dumps({"horizon_weeks": int(horizon_weeks), "lookback_weeks": 8}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise RuntimeError(f"La API respondió HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"No fue posible conectar con la API en {endpoint}") from exc
+
+    predictions = pd.DataFrame(payload.get("predictions", []))
+    if predictions.empty:
+        raise RuntimeError("La API respondió sin predicciones")
+    predictions = predictions.rename(columns={"tallos_estimados": "prediccion"})
+    predictions["week_start"] = pd.to_datetime(predictions["week_start"], errors="coerce")
+    predictions["prediccion"] = pd.to_numeric(predictions["prediccion"], errors="coerce")
+    predictions = predictions.dropna(subset=["week_start", "prediccion"])
+    return predictions, payload
 
 
 def evaluation_table(evaluation: pd.DataFrame) -> dash_table.DataTable:
@@ -139,13 +168,16 @@ def build_figures(data: dict[str, pd.DataFrame]) -> dict[str, go.Figure]:
     return {"weekly": weekly_fig, "evaluation": eval_fig, "backtest": backtest_fig, "future": future_fig}
 
 
-def make_app(data_path: str | None = None, data_dir: str | None = None, output_dir: str | Path | None = None) -> Dash:
+def make_app(data_path: str | None = None, data_dir: str | None = None, output_dir: str | Path | None = None, api_url: str | None = None) -> Dash:
     config = load_config()
     source_path = data_path or (str(config.data_path) if config.data_path else None)
     source_dir = data_dir or str(config.data_dir)
     forecast_output_dir = output_dir or config.output_dir
+    forecast_api_url = api_url or os.getenv("LGF_API_URL", "http://127.0.0.1:8001")
     data = prepare_dashboard_data(source_path, source_dir, forecast_output_dir)
     models = sorted(data["backtest"]["modelo"].dropna().unique().tolist()) if not data["backtest"].empty else []
+    selected_eval = data["evaluation"][data["evaluation"].get("modelo_seleccionado", False).astype(bool)] if not data["evaluation"].empty else pd.DataFrame()
+    default_model = str(selected_eval["modelo"].iloc[0]) if not selected_eval.empty else (models[0] if models else None)
 
     app = Dash(__name__, title="LGF Forecast SOLIDO")
     app.layout = html.Div(
@@ -173,8 +205,9 @@ def make_app(data_path: str | None = None, data_dir: str | None = None, output_d
             ),
             html.Div(
                 [
-                    html.Div([html.Label("Modelo en backtest"), dcc.Dropdown(id="model", options=[{"label": m, "value": m} for m in models], value=models[0] if models else None, clearable=True)], className="control"),
-                    html.Div([html.Label("Salida forecast"), html.Div(str(Path(forecast_output_dir) / "forecast"), className="source-path dark")], className="control control-wide"),
+                    html.Div([html.Label("Modelo visualizado en backtest"), dcc.Dropdown(id="model", options=[{"label": m, "value": m} for m in models], value=default_model, clearable=True)], className="control"),
+                    html.Div([html.Label("Horizonte de decisión"), dcc.Dropdown(id="horizon", options=[{"label": f"{n} semanas", "value": n} for n in [4, 8, 12]], value=8, clearable=False)], className="control"),
+                    html.Div([html.Label("Inferencia en línea"), html.Button("Consultar API", id="forecast-button", n_clicks=0, className="action-button"), html.Div(f"API: {forecast_api_url}", id="api-status", className="api-status")], className="control"),
                 ],
                 className="filters",
             ),
@@ -202,7 +235,7 @@ def make_app(data_path: str | None = None, data_dir: str | None = None, output_d
     .kicker{color:#f8d7df;text-transform:uppercase;font-size:12px;font-weight:800;letter-spacing:.08em}h1{margin:5px 0 8px;font-size:42px;line-height:1.05;letter-spacing:0}.hero p{margin:0;color:#f6e7ec;font-size:16px;max-width:760px}
     .nav-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.nav-link{display:inline-flex;align-items:center;min-height:34px;padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.35);color:#fff;text-decoration:none;font-size:13px;font-weight:800;background:rgba(255,255,255,.10)}.nav-link.active{background:#fff;color:#800020}
     .source-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:13px}.source-label{font-size:11px;font-weight:800;color:#f8d7df;text-transform:uppercase}.source-path{font-size:13px;word-break:break-all;color:#fff}.dark{color:#374151}
-    .filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;background:#fff;border:1px solid #d9dee7;border-left:5px solid #800020;border-radius:8px;padding:14px;margin-bottom:14px}.control-wide{grid-column:span 2}label{display:block;font-size:11px;font-weight:800;color:#374151;text-transform:uppercase;margin-bottom:4px}
+    .filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;background:#fff;border:1px solid #d9dee7;border-left:5px solid #800020;border-radius:8px;padding:14px;margin-bottom:14px}.control-wide{grid-column:span 2}label{display:block;font-size:11px;font-weight:800;color:#374151;text-transform:uppercase;margin-bottom:4px}.action-button{width:100%;min-height:38px;border:0;border-radius:6px;background:#800020;color:#fff;font-weight:800;cursor:pointer}.action-button:hover{background:#a51f43}.api-status{margin-top:6px;font-size:12px;color:#667085;word-break:break-all}
     .metrics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.metric-card{background:#fff;border:1px solid #d9dee7;border-top:4px solid #800020;border-radius:8px;padding:13px;min-height:96px}.metric-head{display:flex;justify-content:space-between;gap:8px}.metric-title{font-size:11px;font-weight:800;color:#667085;text-transform:uppercase}.metric-value{font-size:24px;font-weight:800;margin-top:10px;color:#17202a}.metric-detail{font-size:12px;color:#667085;margin-top:5px}.delta{font-size:12px;font-weight:800;border-radius:999px;padding:3px 7px;background:#eef2f7}
     .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel,.table-panel{background:#fff;border:1px solid #d9dee7;border-radius:8px;padding:13px;min-width:0;box-shadow:0 8px 20px rgba(23,32,42,.04)}.panel-title{font-size:16px;font-weight:800;margin:2px 0 10px;color:#17202a}.section-gap{margin-top:14px}
     .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th{background:#800020!important;color:#fff!important;font-weight:800!important}.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td{font-size:12px}
@@ -218,10 +251,21 @@ def make_app(data_path: str | None = None, data_dir: str | None = None, output_d
         Output("fig-future", "figure"),
         Output("evaluation-table", "children"),
         Output("future-table", "children"),
+        Output("api-status", "children"),
         Input("model", "value"),
+        Input("forecast-button", "n_clicks"),
+        Input("horizon", "value"),
     )
-    def update(selected_model):
+    def update(selected_model, n_clicks, horizon_weeks):
         view_data = {key: value.copy() for key, value in data.items()}
+        api_status = f"API lista para consultar: {forecast_api_url}"
+        if n_clicks:
+            try:
+                api_future, payload = request_api_forecast(forecast_api_url, int(horizon_weeks or 8))
+                view_data["future"] = api_future
+                api_status = f"API conectada · {payload.get('model', 'modelo sin nombre')} · {len(api_future)} semanas recibidas"
+            except RuntimeError as exc:
+                api_status = f"Error: {exc}. Se conserva el último forecast disponible."
         if selected_model and not view_data["backtest"].empty:
             view_data["backtest"] = view_data["backtest"][view_data["backtest"]["modelo"].eq(selected_model)]
         figs = build_figures(view_data)
@@ -230,13 +274,14 @@ def make_app(data_path: str | None = None, data_dir: str | None = None, output_d
             future["prediccion"] = future["prediccion"].map(lambda value: money(value, 0))
             future["week_start"] = pd.to_datetime(future["week_start"]).dt.strftime("%Y-%m-%d")
         return (
-            build_metric_cards(data),
+            build_metric_cards(view_data),
             figs["weekly"],
             figs["evaluation"],
             figs["backtest"],
             figs["future"],
             evaluation_table(data["evaluation"]),
             table(future, page_size=12),
+            api_status,
         )
 
     return app
@@ -247,6 +292,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-path", default=os.getenv("LGF_DATA_PATH"), help="Ruta al historic_sales_acum.csv")
     parser.add_argument("--data-dir", default=os.getenv("LGF_DATA_DIR"), help="Carpeta de respaldo con CSV por anio.")
     parser.add_argument("--output-dir", default=os.getenv("LGF_OUTPUT_DIR", "outputs"), help="Carpeta con outputs/forecast.")
+    parser.add_argument("--api-url", default=os.getenv("LGF_API_URL", "http://127.0.0.1:8001"), help="URL base de la API de inferencia.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8053, type=int)
     parser.add_argument("--debug", action="store_true")
@@ -255,7 +301,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    app = make_app(data_path=args.data_path, data_dir=args.data_dir, output_dir=args.output_dir)
+    app = make_app(data_path=args.data_path, data_dir=args.data_dir, output_dir=args.output_dir, api_url=args.api_url)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
