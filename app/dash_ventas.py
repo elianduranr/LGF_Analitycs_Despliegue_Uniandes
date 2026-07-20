@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 from dash import Dash, Input, Output, dash_table, dcc, html
 
 from lgf_despliegue.config import load_config
-from lgf_despliegue.data import load_sales_source
+from lgf_despliegue.data import clean_sales_frame, load_sales_source
 
 
 CORPORATE_BURGUNDY = "#800020"
@@ -201,7 +201,24 @@ def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
         except (OSError, ValueError, KeyError):
             pass
 
-    raw = load_sales_source(data_path=data_path or None, data_dir=data_dir)
+    if source and source.suffix.lower() == ".csv":
+        dashboard_source_columns = {
+            "NomCompania", "fecha", "cod_cliente", "cliente", "cliente_consolidado",
+            "producto", "color", "pais", "pedido", "tipo_orden_empaque", "tipo_empaque",
+            "empaque", "tallos_total", "tallos_confirmados", "estado", "VALORTOTAL",
+            "ventas_usd",
+        }
+        available = set(pd.read_csv(source, nrows=0).columns)
+        usecols = sorted(dashboard_source_columns & available)
+        confirmed_chunks = []
+        for chunk in pd.read_csv(source, usecols=usecols, chunksize=100_000, low_memory=False):
+            cleaned = clean_sales_frame(chunk)
+            confirmed = cleaned[cleaned["es_confirmado"]].copy()
+            if not confirmed.empty:
+                confirmed_chunks.append(confirmed)
+        raw = pd.concat(confirmed_chunks, ignore_index=True) if confirmed_chunks else pd.DataFrame()
+    else:
+        raw = load_sales_source(data_path=data_path or None, data_dir=data_dir)
     df = raw[raw["es_confirmado"]].copy()
     if df.empty:
         df = raw.copy()
@@ -216,6 +233,16 @@ def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
     df["cliente"] = df["cliente_analisis"].astype(str)
     df["pedidos"] = df["pedidos"].astype(str)
     df["anio_semana"] = df["anio"].astype(str) + "-S" + df["semana_iso"].astype(str).str.zfill(2)
+
+    dashboard_columns = [
+        "anio", "mes", "semana_iso", "NomCompania", "cod_cliente", "cliente", "pais",
+        "producto", "color", "producto_color", "tipo_pedido_operativo", "es_solido",
+        "tallos_confirmados", "ventas_usd", "valor_total_original", "precio_usd_tallo",
+        "pedidos", "anio_semana",
+    ]
+    df = df[dashboard_columns].copy()
+    for column in ["NomCompania", "pais", "producto", "color", "producto_color", "tipo_pedido_operativo", "anio_semana"]:
+        df[column] = df[column].astype("category")
 
     if source and source.exists():
         cache_dir.mkdir(parents=True, exist_ok=True)
