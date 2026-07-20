@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -186,6 +187,20 @@ def flower_chip(label: str, value: str, color: str, detail: str = "") -> html.Di
 
 @lru_cache(maxsize=2)
 def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
+    cache_dir = Path(os.getenv("LGF_OUTPUT_DIR", "outputs")) / "cache"
+    cache_path = cache_dir / "ventas_dashboard.parquet"
+    metadata_path = cache_dir / "ventas_dashboard.json"
+    source = Path(data_path) if data_path else None
+
+    if source and source.exists() and cache_path.exists() and metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            signature = {"path": str(source.resolve()), "size": source.stat().st_size, "mtime_ns": source.stat().st_mtime_ns}
+            if metadata.get("source") == signature:
+                return pd.read_parquet(cache_path)
+        except (OSError, ValueError, KeyError):
+            pass
+
     raw = load_sales_source(data_path=data_path or None, data_dir=data_dir)
     df = raw[raw["es_confirmado"]].copy()
     if df.empty:
@@ -201,6 +216,12 @@ def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
     df["cliente"] = df["cliente_analisis"].astype(str)
     df["pedidos"] = df["pedidos"].astype(str)
     df["anio_semana"] = df["anio"].astype(str) + "-S" + df["semana_iso"].astype(str).str.zfill(2)
+
+    if source and source.exists():
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(cache_path, index=False, compression="snappy")
+        signature = {"path": str(source.resolve()), "size": source.stat().st_size, "mtime_ns": source.stat().st_mtime_ns}
+        metadata_path.write_text(json.dumps({"source": signature}, ensure_ascii=False, indent=2), encoding="utf-8")
     return df
 
 
@@ -356,25 +377,43 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
     if ctx["comparison"]:
         annual_rows.append({"anio": f"Año base {ctx['base']}", "ventas": ctx["base_m"]["ventas"]})
     annual_rows.append({"anio": f"Año seleccionado {ctx['compare']}", "ventas": ctx["comp_m"]["ventas"]})
-    fig_consolidated = px.bar(pd.DataFrame(annual_rows), x="anio", y="ventas", title="Consolidado real USD", color="anio", color_discrete_sequence=CORPORATE_SEQUENCE)
+    fig_consolidated = px.bar(pd.DataFrame(annual_rows), x="anio", y="ventas", title="Facturación anual: base vs. seleccionado", color="anio", color_discrete_sequence=["#4E79A7", CORPORATE_BURGUNDY])
     apply_layout(fig_consolidated, 330)
     fig_consolidated.update_yaxes(title="USD", tickformat=",.2f")
 
     monthly = summarize(view[view["anio"].isin([y for y in [ctx["base"], ctx["compare"]] if y])], ["anio", "mes"])
     monthly["Mes"] = monthly["mes"].map(lambda m: MONTHS[int(m) - 1] if 1 <= int(m) <= 12 else str(m))
-    fig_monthly = px.bar(monthly, x="Mes", y="ventas_usd", color="anio", barmode="group", title="Facturacion USD por mes", color_discrete_sequence=CORPORATE_SEQUENCE)
+    monthly["Año"] = monthly["anio"].astype(int).astype(str)
+    year_colors = {
+        str(ctx["base"]): "#4E79A7",
+        str(ctx["compare"]): CORPORATE_BURGUNDY,
+    }
+    fig_monthly = px.bar(
+        monthly,
+        x="Mes",
+        y="ventas_usd",
+        color="Año",
+        barmode="group",
+        title="Facturación mensual: año base vs. año seleccionado",
+        labels={"ventas_usd": "Facturación (USD)"},
+        color_discrete_map=year_colors,
+        category_orders={"Mes": MONTHS},
+    )
     apply_layout(fig_monthly, 360)
-    fig_monthly.update_yaxes(title="USD", tickformat=",.2f")
+    fig_monthly.update_yaxes(title="Facturación (USD)", tickformat="$,.0f")
+    fig_monthly.update_xaxes(title="Mes")
+    fig_monthly.update_layout(legend_title_text="Año", hovermode="x unified")
 
     weekly = summarize(view, ["anio", "semana_iso"]).sort_values(["anio", "semana_iso"])
-    fig_weekly = px.line(weekly, x="semana_iso", y="tallos_confirmados", color="anio", markers=True, title="Tallos confirmados por semana", color_discrete_sequence=CORPORATE_SEQUENCE)
+    weekly["Año"] = weekly["anio"].astype(int).astype(str)
+    fig_weekly = px.line(weekly, x="semana_iso", y="tallos_confirmados", color="Año", markers=True, title="Tallos semanales por año", color_discrete_map=year_colors)
     apply_layout(fig_weekly, 370)
     fig_weekly.update_yaxes(title="Tallos", tickformat=",d")
     fig_weekly.update_xaxes(title="Semana ISO")
 
     prod = product_compare_table(ctx, rows=10)
     raw_prod = ctx["compare_frame"].groupby("producto", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos_confirmados=("tallos_confirmados", "sum")).sort_values("ventas_usd", ascending=False).head(10)
-    fig_product_usd = px.bar(raw_prod.sort_values("ventas_usd"), y="producto", x="ventas_usd", orientation="h", title="Productos que explican la facturación", color_discrete_sequence=[CORPORATE_BURGUNDY])
+    fig_product_usd = px.bar(raw_prod.sort_values("ventas_usd"), y="producto", x="ventas_usd", orientation="h", title=f"Productos que explican la facturación — {ctx['compare']}", color_discrete_sequence=[CORPORATE_BURGUNDY])
     apply_layout(fig_product_usd, 370)
     fig_product_usd.update_xaxes(title="USD", tickformat=",.2f")
     fig_product_usd.update_yaxes(title="")
@@ -388,14 +427,14 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
     price = ctx["compare_frame"].groupby("producto", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos=("tallos_confirmados", "sum"))
     price["precio"] = (price["ventas_usd"] / price["tallos"].replace(0, np.nan)).fillna(0)
     price = price.sort_values("ventas_usd", ascending=False).head(12).sort_values("precio")
-    fig_price = px.bar(price, y="producto", x="precio", orientation="h", title="Precio promedio por producto", color_discrete_sequence=["#4E79A7"])
+    fig_price = px.bar(price, y="producto", x="precio", orientation="h", title=f"Precio promedio por producto — {ctx['compare']}", color_discrete_sequence=["#4E79A7"])
     apply_layout(fig_price, 360)
     fig_price.update_xaxes(title="USD/tallo", tickformat=",.4f")
     fig_price.update_yaxes(title="")
 
     opp = ctx["compare_frame"].groupby("producto", as_index=False).agg(ventas_usd=("ventas_usd", "sum"), tallos=("tallos_confirmados", "sum"), clientes=("cod_cliente", "nunique"))
     opp["precio"] = (opp["ventas_usd"] / opp["tallos"].replace(0, np.nan)).fillna(0)
-    fig_opp = px.scatter(opp, x="tallos", y="precio", size="ventas_usd", color="producto", hover_data=["clientes", "ventas_usd"], title="Matriz de oportunidad: volumen vs precio", color_discrete_sequence=CORPORATE_SEQUENCE)
+    fig_opp = px.scatter(opp, x="tallos", y="precio", size="ventas_usd", color="producto", hover_data=["clientes", "ventas_usd"], title=f"Matriz de oportunidad: volumen vs. precio — {ctx['compare']}", color_discrete_sequence=CORPORATE_SEQUENCE)
     apply_layout(fig_opp, 360)
     fig_opp.update_xaxes(title="Tallos", tickformat=",d")
     fig_opp.update_yaxes(title="USD/tallo", tickformat=",.4f")
@@ -407,7 +446,7 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
         y="color",
         x="tallos",
         orientation="h",
-        title="Colores comerciales con mayor volumen",
+        title=f"Colores comerciales con mayor volumen — {ctx['compare']}",
         color="color",
         color_discrete_map=color_map,
         hover_data=["ventas_usd"],
@@ -422,7 +461,7 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
         y="pais",
         x="ventas_usd",
         orientation="h",
-        title="Mercados destino por facturación",
+        title=f"Mercados destino por facturación — {ctx['compare']}",
         color_discrete_sequence=["#4E79A7"],
         hover_data=["tallos", "clientes"],
     )
@@ -436,7 +475,7 @@ def build_figures(view: pd.DataFrame, ctx: dict) -> dict[str, go.Figure]:
         y="producto_color",
         x="tallos",
         orientation="h",
-        title="Producto-color: demanda accionable",
+        title=f"Producto-color: demanda accionable — {ctx['compare']}",
         color_discrete_sequence=[CORPORATE_BURGUNDY],
         hover_data=["ventas_usd", "clientes"],
     )
