@@ -16,3 +16,4 @@ dist/
 datos/raw/*.csv
 !datos/raw/*.dvc
 
+.env

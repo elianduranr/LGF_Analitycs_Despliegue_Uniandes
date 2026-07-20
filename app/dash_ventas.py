@@ -210,10 +210,16 @@ def load_dashboard_data(data_path: str | None, data_dir: str) -> pd.DataFrame:
         }
         available = set(pd.read_csv(source, nrows=0).columns)
         usecols = sorted(dashboard_source_columns & available)
+        cleaned_columns = [
+            "es_confirmado", "tallos_demanda", "ventas_usd", "valor_total_original",
+            "tallos_confirmados", "tipo_pedido_operativo", "es_solido", "NomCompania",
+            "cliente_analisis", "cod_cliente", "pedidos", "anio", "semana_iso", "mes",
+            "producto", "producto_color", "pais", "color",
+        ]
         confirmed_chunks = []
         for chunk in pd.read_csv(source, usecols=usecols, chunksize=100_000, low_memory=False):
             cleaned = clean_sales_frame(chunk)
-            confirmed = cleaned[cleaned["es_confirmado"]].copy()
+            confirmed = cleaned.loc[cleaned["es_confirmado"], cleaned_columns].copy()
             if not confirmed.empty:
                 confirmed_chunks.append(confirmed)
         raw = pd.concat(confirmed_chunks, ignore_index=True) if confirmed_chunks else pd.DataFrame()
