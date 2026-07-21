@@ -328,9 +328,11 @@ def build_context(view: pd.DataFrame, base_year: int | None, compare_year: int |
 
 
 def product_compare_table(ctx: dict, rows: int = 20) -> pd.DataFrame:
-    comp = ctx["compare_frame"].groupby("producto", as_index=False).agg(tallos_compare=("tallos_confirmados", "sum"), usd_compare=("ventas_usd", "sum"))
-    base = ctx["base_frame"].groupby("producto", as_index=False).agg(tallos_base=("tallos_confirmados", "sum"), usd_base=("ventas_usd", "sum")) if ctx["comparison"] else pd.DataFrame(columns=["producto", "tallos_base", "usd_base"])
-    out = base.merge(comp, on="producto", how="outer").fillna(0)
+    comp = ctx["compare_frame"].groupby("producto", as_index=False, observed=True).agg(tallos_compare=("tallos_confirmados", "sum"), usd_compare=("ventas_usd", "sum"))
+    base = ctx["base_frame"].groupby("producto", as_index=False, observed=True).agg(tallos_base=("tallos_confirmados", "sum"), usd_base=("ventas_usd", "sum")) if ctx["comparison"] else pd.DataFrame(columns=["producto", "tallos_base", "usd_base"])
+    out = base.merge(comp, on="producto", how="outer")
+    numeric_cols = ["tallos_base", "usd_base", "tallos_compare", "usd_compare"]
+    out[numeric_cols] = out[numeric_cols].fillna(0)
     out["dif_usd"] = out["usd_compare"] - out["usd_base"]
     out["dif_tallos"] = out["tallos_compare"] - out["tallos_base"]
     out["var_usd"] = out.apply(lambda r: variation_label(r["usd_base"], r["usd_compare"], LOW_USD_BASE_THRESHOLD), axis=1)
@@ -362,9 +364,11 @@ def product_compare_table(ctx: dict, rows: int = 20) -> pd.DataFrame:
 def dimension_growth(view: pd.DataFrame, ctx: dict, group_cols: list[str], rows: int = 20) -> pd.DataFrame:
     if not ctx["comparison"]:
         return pd.DataFrame()
-    base = ctx["base_frame"].groupby(group_cols, dropna=False, as_index=False).agg(usd_base=("ventas_usd", "sum"), tallos_base=("tallos_confirmados", "sum"))
-    comp = ctx["compare_frame"].groupby(group_cols, dropna=False, as_index=False).agg(usd_compare=("ventas_usd", "sum"), tallos_compare=("tallos_confirmados", "sum"))
-    out = base.merge(comp, on=group_cols, how="outer").fillna(0)
+    base = ctx["base_frame"].groupby(group_cols, dropna=False, as_index=False, observed=True).agg(usd_base=("ventas_usd", "sum"), tallos_base=("tallos_confirmados", "sum"))
+    comp = ctx["compare_frame"].groupby(group_cols, dropna=False, as_index=False, observed=True).agg(usd_compare=("ventas_usd", "sum"), tallos_compare=("tallos_confirmados", "sum"))
+    out = base.merge(comp, on=group_cols, how="outer")
+    numeric_cols = ["usd_base", "tallos_base", "usd_compare", "tallos_compare"]
+    out[numeric_cols] = out[numeric_cols].fillna(0)
     out["dif_usd"] = out["usd_compare"] - out["usd_base"]
     out["var_usd"] = out.apply(lambda r: variation_label(r["usd_base"], r["usd_compare"], LOW_USD_BASE_THRESHOLD), axis=1)
     out = out.sort_values("usd_compare", ascending=False).head(rows)
